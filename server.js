@@ -389,7 +389,7 @@ app.post("/book",loginRequired,async(req,res)=>{
   }
 });
     const end=String(b.end_time).slice(0,5);
-    const dt=new Date(`${date}T${start}:00`);
+    const dt=new Date(date+"T"+start+":00");
     const canCancel=!b.used&&dt>new Date();
     return `<tr><td>${esc(date)}</td><td>${start}–${end}</td>
       <td>${b.used?"genutzt":dt>new Date()?"aktiv":"abgelaufen"}</td>
