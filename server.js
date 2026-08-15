@@ -460,7 +460,7 @@ app.get("/admin",adminRequired,async(req,res)=>{
   const approved=m.rows.filter(x=>x.status==="approved").length;
   const pending=m.rows.filter(x=>x.status==="pending").length;
 
-  res.send(page("Admin", `${nav(req)}
+  res.send(page("Admin", `
 <div class="card"><h2>Administrator</h2>
 <p>Freigegeben: <b>${approved.length}</b> | Wartend: <b>${pending.length}</b></p></div>
 <div class="card"><h2>Mitglieder</h2><table>${members}</table></div>
