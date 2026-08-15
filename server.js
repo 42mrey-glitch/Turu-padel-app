@@ -385,8 +385,14 @@ app.post("/admin/cancel-booking/:id",adminRequired,async(req,res)=>{
   res.redirect("/admin");
 });
 
-initDb().then(()=>{
-  app.listen(PORT,"0.0.0.0",()=>console.log(`TuRU Padel läuft auf Port ${PORT}`))
-  console.error("Datenbankfehler:",err);
+initDb().then(() => {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`TuRU Padel läuft auf Port ${PORT}`);
+  });
+}).catch(err => {
+  console.error("Datenbankfehler:", err);
+  process.exit(1);
+});
+  
   process.exit(1);
 });
