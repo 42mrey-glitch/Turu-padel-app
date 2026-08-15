@@ -242,21 +242,52 @@ app.get("/login",(req,res)=>res.send(page("Login", `${nav(req)}
  <p>Noch nicht registriert? <a href="/register">Registrieren</a></p></div>`)));
 `));
 
-app.post("/login",async(req,res)=>{ 
-  try{ const email=String(req.body.email||"").trim().toLowerCase();
-    const password=String(req.body.password||"");
-    const r=await pool.query("SELECT * FROM members WHERE email=$1",[email]);
-    const m=r.rows[0];
+app.post("/login", async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
 
-    if(!m || !(await bcrypt.compare(password,m.password_hash)))
-    return res.status(401).send(page("Login", `${nav(req)}<div class="card error"><h2>Login fehlgeschlagen</h2><p>E-Mail oder Passwort ist falsch.</p></div>`));  
+    const r = await pool.query(
+      "SELECT * FROM members WHERE email=$1",
+      [email]
+    );
 
-    if(m.status!=="approved")
-      return res.status(403).send(page("Nicht freigeschaltet",`${nav(req)}<div class="card warn"><h2>⏳ Noch nicht freigeschaltet</h2><p>Der Administrator muss deinen Account zuerst freischalten.</p></div>`));
+    const m = r.rows[0];
 
-    req.session.member={id:m.id,name:m.name,email:m.email,admin:m.admin};
+    if (!m || !(await bcrypt.compare(password, m.password_hash))) {
+      return res
+        .status(401)
+        .send(
+          page(
+            "Login",
+            "<div class=\"card error\"><h2>Login fehlgeschlagen</h2><p>E-Mail oder Passwort ist falsch.</p><p><a href=\"/login\">Zurück zum Login</a></p></div>"
+          )
+        );
+    }
+
+    if (m.status !== "approved") {
+      return res
+        .status(403)
+        .send(
+          page(
+            "Nicht freigeschaltet",
+            "<div class=\"card\"><h2>Noch nicht freigeschaltet</h2><p>Dein Account wartet noch auf die Freischaltung durch den Administrator.</p></div>"
+          )
+        );
+    }
+
+    req.session.member = {
+      id: m.id,
+      name: m.name,
+      email: m.email,
+      admin: m.admin
+    };
+
     res.redirect("/");
-  }catch(e){console.error(e);res.status(500).send("Serverfehler");}
+  } catch (e) {
+    console.error(e);
+    res.status(500).send("Serverfehler");
+  }
 });
 
 app.post("/logout",(req,res)=>req.session.destroy(()=>res.redirect("/")));
