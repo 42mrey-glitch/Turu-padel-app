@@ -1,4 +1,4 @@
-const express = require("express");
+ĺconst express = require("express");
 const session = require("express-session");
 const pgSession = require("connect-pg-simple")(session);
 const { Pool } = require("pg");
@@ -409,14 +409,18 @@ app.get("/my-bookings",loginRequired,async(req,res)=>{
   }).join("");
 
   res.send(
-    page(
-      "Meine Buchungen",
-      `${nav(req)}<div class="card"><h2>Meine Buchungen</h2>`+
-      `${rows?
-        '<table><tr><th>Datum</th><th>Zeit</th><th>Status</th><th></th></tr>'+rows+"</table>":
-        "<p>Keine Buchungen.</p>"}</div>`
-    )
-  );
+  page(
+    "Meine Buchungen",
+    nav(req) +
+    '<div class="card"><h2>Meine Buchungen</h2>' +
+    (
+      rows
+        ? '<table><tr><th>Datum</th><th>Zeit</th><th>Status</th><th></th></tr>' + rows + '</table>'
+        : '<p>Keine Buchungen.</p>'
+    ) +
+    '</div>'
+  )
+);
 });
 
 app.post("/cancel/:id",loginRequired,async(req,res)=>{
