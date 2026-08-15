@@ -240,7 +240,7 @@ app.get("/login",(req,res)=>res.send(page("Login", `${nav(req)}
     <button>Anmelden</button>
   </form>
  <p>Noch nicht registriert? <a href="/register">Registrieren</a></p></div>`)));
-));
+`));
 
 app.post("/login",async(req,res)=>{ 
   try{ const email=String(req.body.email||"").trim().toLowerCase();
