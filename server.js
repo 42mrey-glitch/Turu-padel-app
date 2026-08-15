@@ -239,11 +239,11 @@ app.get("/login",(req,res)=>res.send(page("Login",`${nav(req)}
     <label>Passwort</label><input type="password" name="password" required>
     <button>Anmelden</button>
   </form>
-  <p>Noch nicht registriert? <a href="/register">Registrieren</a></p></div>`));
+ <p>Noch nicht registriert? <a href="/register">Registrieren</a></p></div>`));
+});
 
-app.post("/login",async(req,res)=>{
-  try{
-    const email=String(req.body.email||"").trim().toLowerCase();
+app.post("/login",async(req,res)=>{ 
+  try{ const email=String(req.body.email||"").trim().toLowerCase();
     const password=String(req.body.password||"");
     const r=await pool.query("SELECT * FROM members WHERE email=$1",[email]);
     const m=r.rows[0];
