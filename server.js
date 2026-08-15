@@ -347,58 +347,76 @@ app.post("/book",loginRequired,async(req,res)=>{
     }
 
     await client.query(
-      "INSERT INTO bookings(member_id,booking_date,start_time,end_time) VALUES($1,$2,$3,$4)",
-      [req.session.member.id,date,start,end]
-    );
+  "INSERT INTO bookings(member_id,booking_date,start_time,end_time) VALUES($1,$2,$3,$4)",
+  [req.session.member.id,date,start,end]
+);
+  await client.query("COMMIT");
 
-    await client.query("COMMIT");
+res.send(
+  page(
+    "Buchung bestätigt",
+    nav(req) +
+    '<div class="card ok"><h2>✅ Buchung bestätigt</h2>' +
+    "<p><b>" +
+    esc(date) +
+    "</b>, " +
+    esc(start) +
+    "-" +
+    esc(end) +
+    '</p><a href="/my-bookings">Meine Buchungen</a></div>'
+  )
+);
 
-    res.send(
+}catch(e){
+  await client.query("ROLLBACK").catch(()=>{});
+
+  if(e.code==="23505"){
+    return res.status(409).send(
       page(
-        "Buchung bestätigt",
+        "Buchung",
         nav(req) +
-        '<div class="card ok"><h2>Buchung bestätigt</h2><p><b>' +
-        esc(date) +
-        '</b>, ' +
-        esc(start) +
-        '-' +
-        esc(end) +
-        '</p><a href="/my-bookings">Meine Buchungen</a></div>'
+        '<div class="card error"><h2>Slot bereits belegt</h2>' +
+        "<p>Dieser Termin wurde gerade vergeben.</p></div>"
       )
     );
-
-  }catch(e){
-
-    await client.query("ROLLBACK").catch(()=>{});
-
-    if(e.code==="23505"){
-      return res.status(409).send(
-        page(
-          "Buchung",
-          nav(req) +
-          '<div class="card error"><h2>Slot bereits belegt</h2><p>Dieser Termin wurde gerade vergeben.</p></div>'
-        )
-      );
-    }
-
-    console.error(e);
-    res.status(500).send("Serverfehler");
-
-  }finally{
-    client.release();
   }
+  
+
+  console.error(e);
+  res.status(500).send("Serverfehler");
+}finally{
+  client.release();
+}
 });
+
+app.get("/my-bookings",loginRequired,async(req,res)=>{
+    "SELECT * FROM bookings WHERE member_id=$1 ORDER BY booking_date,start_time",
+    [req.session.member.id]
+  );
+
+  const rows=r.rows.map(b=>{
+    const date=String(b.booking_date).slice(0,10);
+    const start=String(b.start_time).slice(0,5);
     const end=String(b.end_time).slice(0,5);
     const dt=new Date(date+"T"+start+":00");
     const canCancel=!b.used&&dt>new Date();
-    return '<tr><td>' + esc(date) + '</td><td>' + start + '-' + end + '</td></tr>';
-      <td>${b.used?"genutzt":dt>new Date()?"aktiv":"abgelaufen"}</td>
-      <td>${canCancel?`<form method="post" action="/cancel/${b.id}" onsubmit="return confirm('Buchung wirklich stornieren?')"><button class="danger">Stornieren</button></form>`:""}</td></tr>`;
+
+    return "<tr><td>"+esc(date)+"</td><td>"+start+"-"+end+"</td>"+
+      "<td>"+(b.used?"genutzt":dt>new Date()?"gebucht":"abgelaufen")+"</td>"+
+      "<td>"+(canCancel?
+        '<form method="post" action="/cancel/'+b.id+'"><button>Stornieren</button></form>':
+        "")+"</td></tr>";
   }).join("");
 
-  res.send(page("Meine Buchungen",`${nav(req)}<div class="card"><h2>Meine Buchungen</h2>
-    ${rows?`<table><tr><th>Datum</th><th>Zeit</th><th>Status</th><th></th></tr>${rows}</table>`:"<p>Keine Buchungen.</p>"}
-  </div>`));
+  res.send(
+    page(
+      "Meine Buchungen",
+      `${nav(req)}<div class="card"><h2>Meine Buchungen</h2>`+
+      `${rows?
+        '<table><tr><th>Datum</th><th>Zeit</th><th>Status</th><th></th></tr>'+rows+"</table>":
+        "<p>Keine Buchungen.</p>"}</div>`
+    )
+  );
 });
 
 app.post("/cancel/:id",loginRequired,async(req,res)=>{
