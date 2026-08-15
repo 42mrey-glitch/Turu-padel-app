@@ -326,12 +326,7 @@ app.post("/book",loginRequired,async(req,res)=>{
   try{
     await client.query("BEGIN");
 
-    const active=await client.query(`
-  SELECT id FROM bookings
-  WHERE member_id=$1 AND used=FALSE
-  AND (booking_date + start_time) > NOW()
-  FOR UPDATE
-`,[req.session.member.id]);
+    const active=await client.query("SELECT id FROM bookings WHERE member_id=$1 AND used=FALSE AND (booking_date + start_time)>NOW() FOR UPDATE",[req.session.member.id]);
 
     if(active.rowCount){
       await client.query("ROLLBACK");
