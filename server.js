@@ -165,15 +165,26 @@ app.get("/", (req,res) => {
     </ul></div>`));
 });
 
-app.get("/register",(req,res)=>res.send(page("Registrierung",`${nav(req)}
-  <div class="card"><h2>Mitglied registrieren</h2>
-  <p>Nach der Registrierung muss der Administrator deinen Account freischalten.</p>
-  <form method="post" action="/register">
-    <label>Name</label><input name="name" maxlength="100" required>
-    <label>E-Mail</label><input type="email" name="email" maxlength="200" required>
-    <label>Passwort</label><input type="password" name="password" minlength="8" required>
-    <button>Registrieren</button>
-  </form></div>`));
+app.get("/register", (req, res) => {
+  res.send(page("Registrierung", `
+    <div class="card">
+      <h2>Mitglied registrieren</h2>
+      <p>Nach der Registrierung muss der Administrator dein Konto freischalten.</p>
+      <form method="post" action="/register">
+        <label>Name</label><br>
+        <input name="name" maxlength="100" required><br>
+
+        <label>E-Mail</label><br>
+        <input type="email" name="email" maxlength="200" required><br>
+
+        <label>Passwort</label><br>
+        <input type="password" name="password" minlength="8" required><br>
+
+        <button type="submit">Registrieren</button>
+      </form>
+    </div>
+  `));
+});
 
 app.post("/register",async(req,res)=>{
   try{
