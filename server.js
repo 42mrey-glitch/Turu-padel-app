@@ -424,7 +424,7 @@ app.get("/my-bookings",loginRequired,async(req,res)=>{
 });
 
 const r = await pool.query(
-  "DELETE FROM bookings WHERE id=$1 AND member_id=$2 AND used=FALSE AND (booking_date + start_time)>NOW() RETURNING *",
+  "DELETE FROM bookings WHERE id=$1 AND member_id=$2 AND used=FALSE AND (booking_date + start_time)>NOW() RETURNING *" 
   [req.params.id, req.session.member.id]
 );
 
