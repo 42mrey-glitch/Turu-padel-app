@@ -413,12 +413,12 @@ app.get("/my-bookings",loginRequired,async(req,res)=>{
     "Meine Buchungen",
     nav(req) +
     '<div class="card"><h2>Meine Buchungen</h2>' +
-    (
-      rows
-        ? '<table><tr><th>Datum</th><th>Zeit</th><th>Status</th><th></th></tr>' + rows + '</table>'
-        : '<p>Keine Buchungen.</p>'
-    ) +
-    '</div>'
+(
+  rows
+    ? '<table><tr><th>Datum</th><th>Zeit</th><th>Status</th><th></th></tr>' + rows + '</table>'
+    : '<p>Keine Buchungen.</p>'
+) +
+'</div>'
   )
 );
 });
