@@ -249,7 +249,7 @@ app.post("/login",async(req,res)=>{
     const m=r.rows[0];
 
     if(!m || !(await bcrypt.compare(password,m.password_hash)))
-      return res.status(401).send(page("Login",`${nav(req)}<div class="card error"><h2>Login fehlgeschlagen</h2><p>E-Mail oder Passwort ist falsch.</p></div>`));
+    return res.status(401).send(page("Login", `${nav(req)}<div class="card error"><h2>Login fehlgeschlagen</h2><p>E-Mail oder Passwort ist falsch.</p></div>`));  
 
     if(m.status!=="approved")
       return res.status(403).send(page("Nicht freigeschaltet",`${nav(req)}<div class="card warn"><h2>⏳ Noch nicht freigeschaltet</h2><p>Der Administrator muss deinen Account zuerst freischalten.</p></div>`));
