@@ -298,14 +298,22 @@ app.get("/booking",loginRequired,async(req,res)=>{
   const r=await pool.query("SELECT start_time FROM bookings WHERE booking_date=$1",[date]);
   const busy=new Set(r.rows.map(x=>String(x.start_time).slice(0,5)));
 
-  const html=slots().map(s=>busy.has(s.start)
-    ? `<div class="slot busy"><b>${s.start}–${s.end}</b><br>belegt</div>`
-    : `<div class="slot"><b>${s.start}–${s.end}</b>
-       <form method="post" action="/book">
-       <input type="hidden" name="date" value="${esc(date)}">
-       <input type="hidden" name="start" value="${s.start}">
-       <input type="hidden" name="end" value="${s.end}">
-       <button>Buchen</button></form></div>`).join("");
+  const html = slots().map(s => {
+  if (busy.has(s.start)) {
+    return '<div class="slot busy"><b>' +
+      s.start + '-' + s.end +
+      '</b><br>belegt</div>';
+  }
+
+  return '<div class="slot"><b>' +
+    s.start + '-' + s.end +
+    '</b>' +
+    '<form method="post" action="/book">' +
+    '<input type="hidden" name="date" value="' + esc(date) + '">' +
+    '<input type="hidden" name="start" value="' + s.start + '">' +
+    '<input type="hidden" name="end" value="' + s.end + '">' +
+    '<button>Buchen</button></form></div>';
+}).join("");
 
   res.send(page("Buchung",`${nav(req)}<div class="card"><h2>${esc(date)}</h2><div class="grid">${html}</div></div>`));
 });
