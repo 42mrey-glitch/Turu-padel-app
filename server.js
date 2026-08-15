@@ -145,25 +145,47 @@ async function initDb() {
   `, ["Administrator", email, hash]);
 }
 
-app.get("/", (req,res) => {
-  const today = new Date().toISOString().slice(0,10);
-  res.send(page("Buchung", `${nav(req)}
-    <div class="card"><h2>Padelplatz buchen</h2>
-    <p>Mitglieder buchen in 90-Minuten-Slots von 09:00 bis 22:00 Uhr.</p>
-    ${req.session.member
-      ? `<p>Angemeldet als <b>${esc(req.session.member.name)}</b>.</p>`
-      : `<div class="warn">Zum Buchen musst du dich anmelden und vom Administrator freigeschaltet sein.</div>`}
-    <form method="get" action="/booking">
-      <label>Datum</label><input type="date" name="date" min="${today}" required>
-      <button>Verfügbarkeit anzeigen</button>
-    </form></div>
-    <div class="card"><h3>Regeln</h3><ul>
-      <li>Maximal 100 freigeschaltete Mitglieder.</li>
-      <li>Eine aktive Buchung pro Mitglied.</li>
-      <li>Nach Ablauf kann wieder gebucht werden.</li>
-      <li>Eigene Buchungen können storniert werden.</li>
-    </ul></div>`));
-});
+app.get("/", (req, res) => {
+  res.send(page("Startseite", `${nav(req)}
+    <div class="card">
+      <h2>TuRU 1880 Padel</h2>
+      <p>Willkommen bei der Padel-Buchung von TuRU 1880.</p>
+
+      ${req.session.member
+        ? `
+          <p>Angemeldet als <b>${esc(req.session.member.name)}</b></p>
+          <p>
+            <a href="/booking">🎾 Platz buchen</a>
+          </p>
+          <form method="post" action="/logout">
+            <button type="submit">Abmelden</button>
+          </form>
+        `
+        : `
+          <p>Padelplätze können ausschließlich von freigeschalteten Mitgliedern gebucht werden.</p>
+          <p>
+            <a href="/login">🔐 Anmelden</a>
+          </p>
+          <p>
+            <a href="/register">📝 Mitglied registrieren</a>
+          </p>
+        `
+      }
+    </div>
+
+    <div class="card">
+      <h3>Unsere Buchungsregeln</h3>
+      <ul>
+        <li>Maximal 100 freigeschaltete Mitglieder.</li>
+        <li>Nur freigeschaltete Mitglieder können buchen.</li>
+        <li>Eine aktive Buchung pro Mitglied.</li>
+        <li>Die Buchungen erfolgen in 90-Minuten-Slots.</li>
+        <li>Nach Nutzung kann erneut gebucht werden.</li>
+        <li>Eigene Buchungen können storniert werden.</li>
+      </ul>
+    </div>
+  `));
+});    
 
 app.get("/register", (req, res) => {
   res.send(page("Registrierung", `
