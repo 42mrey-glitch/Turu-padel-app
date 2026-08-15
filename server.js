@@ -429,7 +429,7 @@ const r = await pool.query(
 );
 
   if(!r.rowCount)
-    return res.status(404).send(page("Stornierung",`${nav(req)}<div class="card error"><h2>Stornierung nicht möglich</h2><p>Die Buchung wurde nicht gefunden oder ist bereits abgelaufen.</p></div>`));
+    return res.status(404).send(page("Stornierung", nav(req) + '<div class="card error"><h2>Stornierung nicht möglich</h2><p>Die Buchung wurde nicht gefunden oder ist bereits abgelaufen.</p></div>'));
 
 app.get("/admin",adminRequired,async(req,res)=>{
   const [m,b]=await Promise.all([
