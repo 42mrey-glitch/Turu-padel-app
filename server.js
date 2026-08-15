@@ -391,7 +391,7 @@ app.post("/book",loginRequired,async(req,res)=>{
     const end=String(b.end_time).slice(0,5);
     const dt=new Date(date+"T"+start+":00");
     const canCancel=!b.used&&dt>new Date();
-    return `<tr><td>${esc(date)}</td><td>${start}–${end}</td>
+    return '<tr><td>' + esc(date) + '</td><td>' + start + '-' + end + '</td></tr>';
       <td>${b.used?"genutzt":dt>new Date()?"aktiv":"abgelaufen"}</td>
       <td>${canCancel?`<form method="post" action="/cancel/${b.id}" onsubmit="return confirm('Buchung wirklich stornieren?')"><button class="danger">Stornieren</button></form>`:""}</td></tr>`;
   }).join("");
