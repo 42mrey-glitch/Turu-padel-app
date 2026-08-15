@@ -423,11 +423,10 @@ app.get("/my-bookings",loginRequired,async(req,res)=>{
 );
 });
 
-app.post("/cancel/:id",loginRequired,async(req,res)=>{
-  const r=await pool.query(`
-    DELETE FROM bookings WHERE id=$1 AND member_id=$2 AND used=FALSE
-    AND (booking_date + start_time)>NOW() RETURNING id
-  `,[req.params.id,req.session.member.id]);
+const r = await pool.query(
+  "DELETE FROM bookings WHERE id=$1 AND member_id=$2 AND used=FALSE AND (booking_date + start_time)>NOW() RETURNING *",
+  [req.params.id, req.session.member.id]
+);
 
   if(!r.rowCount)
     return res.status(404).send(page("Stornierung",`${nav(req)}<div class="card error"><h2>Stornierung nicht möglich</h2><p>Die Buchung wurde nicht gefunden oder ist bereits abgelaufen.</p></div>`));
