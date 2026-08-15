@@ -330,8 +330,7 @@ app.post("/book",loginRequired,async(req,res)=>{
 
     if(active.rowCount){
       await client.query("ROLLBACK");
-      return res.status(409).send(page("Buchung",`${nav(req)}<div class="card warn"><h2>Bereits eine aktive Buchung</h2><p>Du kannst erst wieder buchen, wenn diese Buchung abgelaufen ist.</p><a href="/my-bookings">Meine Buchungen</a></div>`));
-    }
+   return res.status(409).send(page("Buchung", nav(req) + '<div class="card warn"><h2>Bereits eine aktive Buchung</h2><p>Du kannst erst wieder buchen, wenn diese Buchung abgelaufen ist.</p><a href="/my-bookings">Meine Buchungen</a></div>'));   
 
     await client.query(`
       INSERT INTO bookings(member_id,booking_date,start_time,end_time)
@@ -340,7 +339,7 @@ app.post("/book",loginRequired,async(req,res)=>{
 
     await client.query("COMMIT");
     res.send(page("Buchung bestätigt",`${nav(req)}<div class="card ok"><h2>✅ Buchung bestätigt</h2>
-      <p><b>${esc(date)}</b>, ${esc(start)}–${esc(end)}</p><a href="/my-bookings">Meine Buchungen</a></div>`));
+      res.send(page("Buchung bestätigt", nav(req) + '<div class="card ok"><h2>✅ Buchung bestätigt</h2><p><b>' + esc(date) + '</b>, ' + esc(start) + '-' + esc(end) + '</p><a href="/my-bookings">Meine Buchungen</a></div>'));
   }catch(e){
     await client.query("ROLLBACK").catch(()=>{});
     if(e.code==="23505")
