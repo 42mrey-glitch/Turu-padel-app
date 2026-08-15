@@ -437,10 +437,17 @@ app.get("/admin",adminRequired,async(req,res)=>{
     pool.query("SELECT b.*,m.name,m.email FROM bookings b JOIN members m ON m.id=b.member_id ORDER BY b.booking_date,b.start_time")
   ]);
 
-  const members=m.rows.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td>${esc(x.status)}</td><td>
-    ${x.admin?"Administrator":x.status==="pending"?`<form method="post" action="/admin/approve/${x.id}"><button class="green">Freischalten</button></form>`
-    :x.status==="approved"?`<form method="post" action="/admin/block/${x.id}"><button class="danger">Sperren</button></form>`:""}
-  </td></tr>`).join("");
+  const members=m.rows.map(x=>{
+  const action=x.admin
+    ?"Administrator"
+    :x.status==="pending"
+      ?'<form method="post" action="/admin/approve/'+x.id+'"><button type="submit">Freigeben</button></form>'
+      :x.status==="approved"
+        ?'<form method="post" action="/admin/block/'+x.id+'"><button type="submit">Sperren</button></form>'
+        :"";
+
+  return '<tr><td>'+esc(x.name)+'</td><td>'+esc(x.email)+'</td><td>'+esc(x.status)+'</td><td>'+action+'</td></tr>';
+}).join("");
 
   const bookings=b.rows.map(x=>`<tr><td>${esc(x.booking_date)}</td><td>${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}</td>
     <td>${esc(x.name)}</td><td>${esc(x.email)}</td><td><form method="post" action="/admin/cancel-booking/${x.id}"><button class="danger">Stornieren</button></form></td></tr>`).join("");
