@@ -333,7 +333,7 @@ app.post("/book",loginRequired,async(req,res)=>{
    return res.status(409).send(page("Buchung", nav(req) + '<div class="card warn"><h2>Bereits eine aktive Buchung</h2><p>Du kannst erst wieder buchen, wenn diese Buchung abgelaufen ist.</p><a href="/my-bookings">Meine Buchungen</a></div>'));   
 
     await client.query(`
-      INSERT INTO bookings(member_id,booking_date,start_time,end_time)
+      await client.query("INSERT INTO bookings(member_id,booking_date,start_time,end_time) VALUES($1,$2,$3,$4)",[req.session.member.id,date,start,end]);
       VALUES($1,$2,$3,$4)
     `,[req.session.member.id,date,start,end]);
 
