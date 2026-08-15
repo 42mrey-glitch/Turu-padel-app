@@ -320,39 +320,74 @@ app.get("/booking",loginRequired,async(req,res)=>{
 
 app.post("/book",loginRequired,async(req,res)=>{
   const {date,start,end}=req.body;
-  if(!date||!start||!end) return res.status(400).send("Fehlende Angaben");
+
+  if(!date||!start||!end){
+    return res.status(400).send("Fehlende Buchungsdaten");
+  }
 
   const client=await pool.connect();
+
   try{
     await client.query("BEGIN");
 
-    const active=await client.query("SELECT id FROM bookings WHERE member_id=$1 AND used=FALSE AND (booking_date + start_time)>NOW() FOR UPDATE",[req.session.member.id]);
+    const active=await client.query(
+      "SELECT id FROM bookings WHERE member_id=$1 AND used=FALSE AND (booking_date + start_time) > NOW() FOR UPDATE",
+      [req.session.member.id]
+    );
 
     if(active.rowCount){
       await client.query("ROLLBACK");
-   return res.status(409).send(page("Buchung", nav(req) + '<div class="card warn"><h2>Bereits eine aktive Buchung</h2><p>Du kannst erst wieder buchen, wenn diese Buchung abgelaufen ist.</p><a href="/my-bookings">Meine Buchungen</a></div>'));   
+      return res.status(409).send(
+        page(
+          "Buchung",
+          nav(req) +
+          '<div class="card warn"><h2>Bereits eine aktive Buchung</h2><p>Du kannst erst wieder buchen, wenn diese Buchung abgelaufen ist.</p><a href="/my-bookings">Meine Buchungen</a></div>'
+        )
+      );
+    }
 
-    await client.query(`
-      await client.query("INSERT INTO bookings(member_id,booking_date,start_time,end_time) VALUES($1,$2,$3,$4)",[req.session.member.id,date,start,end]);
-      VALUES($1,$2,$3,$4)
-    `,[req.session.member.id,date,start,end]);
+    await client.query(
+      "INSERT INTO bookings(member_id,booking_date,start_time,end_time) VALUES($1,$2,$3,$4)",
+      [req.session.member.id,date,start,end]
+    );
 
     await client.query("COMMIT");
-    res.send(page("Buchung bestätigt",`${nav(req)}<div class="card ok"><h2>✅ Buchung bestätigt</h2>
-      res.send(page("Buchung bestätigt", nav(req) + '<div class="card ok"><h2>✅ Buchung bestätigt</h2><p><b>' + esc(date) + '</b>, ' + esc(start) + '-' + esc(end) + '</p><a href="/my-bookings">Meine Buchungen</a></div>'));
-  }catch(e){
-    await client.query("ROLLBACK").catch(()=>{});
-    if(e.code==="23505")
-      return res.status(409).send(page("Buchung",`${nav(req)}<div class="card error"><h2>Slot bereits belegt</h2><p>Dieser Termin wurde gerade vergeben.</p></div>`));
-    console.error(e);res.status(500).send("Serverfehler");
-  }finally{client.release();}
-});
 
-app.get("/my-bookings",loginRequired,async(req,res)=>{
-  const r=await pool.query("SELECT * FROM bookings WHERE member_id=$1 ORDER BY booking_date,start_time",[req.session.member.id]);
-  const rows=r.rows.map(b=>{
-    const date=String(b.booking_date).slice(0,10);
-    const start=String(b.start_time).slice(0,5);
+    res.send(
+      page(
+        "Buchung bestätigt",
+        nav(req) +
+        '<div class="card ok"><h2>Buchung bestätigt</h2><p><b>' +
+        esc(date) +
+        '</b>, ' +
+        esc(start) +
+        '-' +
+        esc(end) +
+        '</p><a href="/my-bookings">Meine Buchungen</a></div>'
+      )
+    );
+
+  }catch(e){
+
+    await client.query("ROLLBACK").catch(()=>{});
+
+    if(e.code==="23505"){
+      return res.status(409).send(
+        page(
+          "Buchung",
+          nav(req) +
+          '<div class="card error"><h2>Slot bereits belegt</h2><p>Dieser Termin wurde gerade vergeben.</p></div>'
+        )
+      );
+    }
+
+    console.error(e);
+    res.status(500).send("Serverfehler");
+
+  }finally{
+    client.release();
+  }
+});
     const end=String(b.end_time).slice(0,5);
     const dt=new Date(`${date}T${start}:00`);
     const canCancel=!b.used&&dt>new Date();
