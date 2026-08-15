@@ -239,7 +239,7 @@ app.get("/login",(req,res)=>res.send(page("Login", `${nav(req)}
     <label>Passwort</label><input type="password" name="password" required>
     <button>Anmelden</button>
   </form>
- <p>Noch nicht registriert? <a href="/register">Registrieren</a></p></div>`));
+ <p>Noch nicht registriert? <a href="/register">Registrieren</a></p></div>`)));
 });
 
 app.post("/login",async(req,res)=>{ 
