@@ -232,7 +232,7 @@ app.post("/register",async(req,res)=>{
   }catch(e){console.error(e);res.status(500).send("Serverfehler");}
 });
 
-app.get("/login",(req,res)=>res.send(page("Login",`${nav(req)}
+app.get("/login",(req,res)=>res.send(page("Login", `${nav(req)}
   <div class="card"><h2>Mitglieder-Login</h2>
   <form method="post" action="/login">
     <label>E-Mail</label><input type="email" name="email" required>
