@@ -315,7 +315,7 @@ app.get("/booking",loginRequired,async(req,res)=>{
     '<button>Buchen</button></form></div>';
 }).join("");
 
-  res.send(page("Buchung",`${nav(req)}<div class="card"><h2>${esc(date)}</h2><div class="grid">${html}</div></div>`));
+ res.send(page("Buchung", nav(req) + '<div class="card"><h2>' + esc(date) + '</h2><div class="grid">' + html + '</div></div>')); 
 });
 
 app.post("/book",loginRequired,async(req,res)=>{
