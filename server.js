@@ -449,9 +449,14 @@ app.get("/admin",adminRequired,async(req,res)=>{
   return '<tr><td>'+esc(x.name)+'</td><td>'+esc(x.email)+'</td><td>'+esc(x.status)+'</td><td>'+action+'</td></tr>';
 }).join("");
 
-  const bookings=b.rows.map(x=>`<tr><td>${esc(x.booking_date)}</td><td>${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}</td>
-    <td>${esc(x.name)}</td><td>${esc(x.email)}</td><td><form method="post" action="/admin/cancel-booking/${x.id}"><button class="danger">Stornieren</button></form></td></tr>`).join("");
-
+  const bookings=b.rows.map(x =>
+  '<tr><td>' + esc(x.booking_date) +
+  '</td><td>' + String(x.start_time).slice(0,5) +
+  '-' + String(x.end_time).slice(0,5) +
+  '</td><td>' + esc(x.name) +
+  '</td><td>' + esc(x.email) +
+  '</td></tr>'
+).join("");
   const approved=m.rows.filter(x=>x.status==="approved").length;
   const pending=m.rows.filter(x=>x.status==="pending").length;
 
