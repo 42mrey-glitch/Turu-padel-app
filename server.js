@@ -620,20 +620,6 @@ const rows = result.rows.map(booking => {
     : bookingDate > now
     ? "gebucht"
     : "abgelaufen";
-  
-const rows = result.rows.map(booking => {
-  const date = String(booking.booking_date).slice(0, 10);
-  const start = String(booking.start_time).slice(0, 5);
-  const end = String(booking.end_time).slice(0, 5);
-
-  const bookingDateTime = `${date}T${start}`;
-
-  const status = booking.used
-    ? "genutzt"
-    : bookingDateTime > nowBerlin
-    ? "gebucht"
-    : "abgelaufen";
-
       const cancelButton =
         !booking.used && bookingDate > now
           ? '<form method="post" action="/cancel/' +
