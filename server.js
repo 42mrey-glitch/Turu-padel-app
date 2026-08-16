@@ -409,11 +409,16 @@ app.post("/logout", (req, res) => {
 
 app.get("/booking", loginRequired, async (req, res) => {
   try {
-    const date = String(req.query.date || "");
+    let date = String(req.query.date || "");
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return res.redirect("/");
-    }
+if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  date = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+}
 
     const result = await pool.query(
       "SELECT start_time FROM bookings WHERE booking_date=$1",
