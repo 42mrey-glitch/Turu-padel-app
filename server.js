@@ -411,14 +411,14 @@ app.get("/booking", loginRequired, async (req, res) => {
   try {
     let date = String(req.query.date || "");
 
-if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-  date = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Berlin",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(new Date());
-}
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      date = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Berlin",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(new Date());
+    }
 
     const result = await pool.query(
       "SELECT start_time FROM bookings WHERE booking_date=$1",
@@ -435,8 +435,9 @@ if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       if (busy.has(slot.start)) {
         return `
           <div class="slot busy">
-            <b>${slot.start}-${slot.end}</b><br>
-            belegt
+            <b>${slot.start}-${slot.end}</b>
+            <br>
+            <span>belegt</span>
           </div>
         `;
       }
@@ -444,7 +445,6 @@ if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return `
         <div class="slot">
           <b>${slot.start}-${slot.end}</b>
-
           <form method="post" action="/book">
             <input type="hidden" name="date" value="${esc(date)}">
             <input type="hidden" name="start" value="${esc(slot.start)}">
@@ -459,13 +459,38 @@ if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       page(
         "Buchung",
         nav(req) +
-        '<div class="card"><h2>' +
-        esc(date) +
-        '</h2><div class="grid">' +
-        html +
-        '</div></div>'
+        `
+        <div class="card">
+          <h2>🎾 Platz buchen</h2>
+
+          <label for="bookingDate">
+            <b>Datum auswählen</b>
+          </label>
+
+          <input
+            type="date"
+            id="bookingDate"
+            value="${esc(date)}"
+            min="${esc(date)}"
+            onchange="window.location.href='/booking?date='+this.value"
+          >
+
+          <p>
+            <b>Gewählter Tag:</b> ${esc(date)}
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>Verfügbare Zeiten</h2>
+
+          <div class="grid">
+            ${html}
+          </div>
+        </div>
+        `
       )
     );
+
   } catch (error) {
     console.error(error);
     res.status(500).send("Serverfehler");
