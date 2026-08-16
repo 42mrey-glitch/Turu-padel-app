@@ -466,7 +466,8 @@ app.get("/admin",adminRequired,async(req,res)=>{
   '<p>Freigegeben: <b>' + approved.length + '</b> | Wartend: <b>' + pending.length + '</b></p></div>' +
   '<div class="card"><h2>Mitglieder</h2><table>' + members + '</table></div>' +
   '<div class="card"><h2>Alle Buchungen</h2><table>' + bookings + '</table></div>'
-));   
+));  
+});
 app.post("/admin/approve/:id",adminRequired,async(req,res)=>{
   const c=await pool.query("SELECT COUNT(*)::int AS n FROM members WHERE status='approved'");
  if(c.rows[0].n>=100) return res.status(409).send(page("Admin", nav(req) + '<div class="card warn"><h2>100 Mitglieder erreicht</h2></div>'));
