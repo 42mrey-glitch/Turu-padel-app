@@ -622,6 +622,14 @@ const bookingDate = new Date(
   minute,
   0
 );
+const bookingDate = new Date(
+  year,
+  month - 1,
+  day,
+  hour,
+  minute,
+  0
+);
 
   const status = booking.used
     ? "genutzt"
