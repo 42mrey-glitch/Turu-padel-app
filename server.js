@@ -604,22 +604,28 @@ app.get("/my-bookings", loginRequired, async (req, res) => {
       [req.session.member.id]
     );
 
-    const now = new Date();
+    const nowBerlin = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Berlin",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+}).format(new Date()).replace(",", "");
 
-    const rows = result.rows.map(booking => {
-      const date = String(booking.booking_date).slice(0, 10);
-      const start = String(booking.start_time).slice(0, 5);
-      const end = String(booking.end_time).slice(0, 5);
+const rows = result.rows.map(booking => {
+  const date = String(booking.booking_date).slice(0, 10);
+  const start = String(booking.start_time).slice(0, 5);
+  const end = String(booking.end_time).slice(0, 5);
 
-      const bookingDate = new Date(
-        date + "T" + start + ":00"
-      );
+  const bookingDateTime = `${date}T${start}`;
 
-      const status = booking.used
-        ? "genutzt"
-        : bookingDate > now
-          ? "gebucht"
-          : "abgelaufen";
+  const status = booking.used
+    ? "genutzt"
+    : bookingDateTime > nowBerlin
+    ? "gebucht"
+    : "abgelaufen";
 
       const cancelButton =
         !booking.used && bookingDate > now
