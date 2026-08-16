@@ -620,15 +620,7 @@ const rows = result.rows.map(booking => {
     : bookingDate > now
     ? "gebucht"
     : "abgelaufen";
-  timeZone: "Europe/Berlin",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false
-}).format(new Date()).replace(",", "");
-
+  
 const rows = result.rows.map(booking => {
   const date = String(booking.booking_date).slice(0, 10);
   const start = String(booking.start_time).slice(0, 5);
