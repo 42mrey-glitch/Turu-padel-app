@@ -604,7 +604,22 @@ app.get("/my-bookings", loginRequired, async (req, res) => {
       [req.session.member.id]
     );
 
-    const nowBerlin = new Intl.DateTimeFormat("en-CA", {
+    const now = new Date();
+
+const rows = result.rows.map(booking => {
+  const date = String(booking.booking_date).slice(0, 10);
+  const start = String(booking.start_time).slice(0, 5);
+  const end = String(booking.end_time).slice(0, 5);
+
+  const bookingDate = new Date(
+    date + "T" + start + ":00"
+  );
+
+  const status = booking.used
+    ? "genutzt"
+    : bookingDate > now
+    ? "gebucht"
+    : "abgelaufen";
   timeZone: "Europe/Berlin",
   year: "numeric",
   month: "2-digit",
