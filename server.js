@@ -492,6 +492,3 @@ initDb().then(() => {
   console.error("Datenbankfehler:", err);
   process.exit(1);
 });
-  
-  process.exit(1);
-});
