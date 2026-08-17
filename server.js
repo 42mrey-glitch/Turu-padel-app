@@ -607,7 +607,7 @@ app.get("/my-bookings", loginRequired, async (req, res) => {
     const now = new Date();
 
 const rows = result.rows.map(booking => {
-  const date = String(booking.booking_date).slice(0, 10);
+  const date = booking.booking_date.toISOString().slice(0, 10);
   const start = String(booking.start_time).slice(0, 5);
   const end = String(booking.end_time).slice(0, 5);
 const bookingDate = new Date(`${date}T${start}:00`);
