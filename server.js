@@ -59,6 +59,7 @@ function page(title, body) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} – TuRU 1880 Padel</title>
+<style>
 body{
   font-family:Arial,sans-serif;
   margin:0;
