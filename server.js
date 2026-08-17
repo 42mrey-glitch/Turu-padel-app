@@ -138,6 +138,7 @@ button:hover{
     min-width:650px;
   }
 }
+</style>
 </head>
 <body>
 <header>
