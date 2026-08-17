@@ -610,7 +610,14 @@ const rows = result.rows.map(booking => {
   const date = String(booking.booking_date).slice(0, 10);
   const start = String(booking.start_time).slice(0, 5);
   const end = String(booking.end_time).slice(0, 5);
-
+console.log("BOOKING DEBUG:", {
+  rawDate: booking.booking_date,
+  rawStart: booking.start_time,
+  date,
+  start,
+  bookingDate,
+  now
+});
 const bookingDate = new Date(`${date}T${start}:00`);
   const status = booking.used
     ? "genutzt"
