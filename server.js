@@ -52,127 +52,503 @@ function esc(value = "") {
     .replaceAll("'", "&#039;");
 }
 
-function page(title, body) {
+function berlinDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+}
+
+function berlinTimeMinutes() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Berlin",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date());
+
+  const hour = Number(
+    parts.find(p => p.type === "hour")?.value || 0
+  );
+
+  const minute = Number(
+    parts.find(p => p.type === "minute")?.value || 0
+  );
+
+  return hour * 60 + minute;
+}
+
+function isPastSlot(date, start) {
+  const today = berlinDate();
+
+  if (date < today) return true;
+  if (date > today) return false;
+
+  const [hour, minute] = String(start).split(":").map(Number);
+
+  return hour * 60 + minute <= berlinTimeMinutes();
+}
+
+function page(title, body, req) {
   return `<!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} – TuRU 1880 Padel</title>
+
 <style>
-body{
-  font-family:Arial,sans-serif;
-  margin:0;
-  background:#f3f6fb;
-  color:#172b4d;
+:root{
+  --blue:#174b9b;
+  --blue-dark:#123b7c;
+  --blue-light:#edf4ff;
+  --text:#172033;
+  --muted:#667085;
+  --line:#e5eaf2;
+  --bg:#f6f8fc;
+  --white:#ffffff;
+  --green:#138a55;
+  --orange:#c47b00;
+  --red:#c0392b;
 }
 
-header{
-  background:#163b73;
-  color:white;
-  padding:28px 20px;
-  text-align:center;
+*{
+  box-sizing:border-box;
+}
+
+body{
+  margin:0;
+  font-family:Arial,Helvetica,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+
+a{
+  color:var(--blue);
+  text-decoration:none;
+  font-weight:700;
+}
+
+a:hover{
+  text-decoration:underline;
+}
+
+.topbar{
+  background:#fff;
+  border-bottom:1px solid var(--line);
+}
+
+.brand{
+  max-width:1120px;
+  margin:0 auto;
+  padding:24px 22px 18px;
+  display:flex;
+  align-items:center;
+  gap:14px;
+}
+
+.brand-mark{
+  width:48px;
+  height:48px;
+  border-radius:12px;
+  background:var(--blue);
+  color:#fff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:900;
+  font-size:13px;
+  box-shadow:0 5px 16px rgba(23,75,155,.20);
+}
+
+.brand-title{
+  font-size:23px;
+  font-weight:900;
+  color:var(--blue);
+  line-height:1.1;
+}
+
+.brand-sub{
+  margin-top:4px;
+  color:var(--muted);
+  font-size:13px;
+}
+
+.nav{
+  max-width:1120px;
+  margin:0 auto;
+  padding:0 22px 18px;
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+
+.nav a,
+.nav button{
+  border:1px solid var(--line);
+  background:#fff;
+  color:#334155;
+  padding:9px 13px;
+  border-radius:9px;
+  font-size:14px;
+  font-weight:800;
+  cursor:pointer;
+}
+
+.nav a:hover,
+.nav button:hover{
+  background:var(--blue-light);
+  border-color:#c9daf7;
+  text-decoration:none;
+}
+
+.nav .primary{
+  background:var(--blue);
+  color:#fff;
+  border-color:var(--blue);
+}
+
+.nav .primary:hover{
+  background:var(--blue-dark);
 }
 
 main{
-  max-width:1100px;
-  margin:30px auto;
-  padding:0 20px;
+  max-width:1120px;
+  margin:28px auto 60px;
+  padding:0 22px;
+}
+
+.hero{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:30px;
+  margin-bottom:20px;
+  box-shadow:0 8px 28px rgba(20,40,80,.06);
+}
+
+.hero h1{
+  margin:0 0 8px;
+  color:var(--blue);
+  font-size:30px;
+}
+
+.hero p{
+  margin:7px 0;
+  color:var(--muted);
+  line-height:1.6;
 }
 
 .card{
-  background:white;
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:16px;
   padding:24px;
-  margin-bottom:24px;
-  border-radius:14px;
-  box-shadow:0 4px 14px rgba(0,0,0,.08);
+  margin-bottom:20px;
+  box-shadow:0 6px 22px rgba(20,40,80,.05);
 }
 
-h1,h2{
-  color:#163b73;
+.card h2{
+  margin:0 0 16px;
+  color:#18345f;
+  font-size:21px;
+}
+
+.muted{
+  color:var(--muted);
+}
+
+.actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:18px;
+}
+
+.btn,
+button.btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:42px;
+  padding:10px 17px;
+  border:1px solid var(--blue);
+  border-radius:10px;
+  background:var(--blue);
+  color:#fff;
+  font-weight:800;
+  cursor:pointer;
+  text-decoration:none;
+}
+
+.btn:hover,
+button.btn:hover{
+  background:var(--blue-dark);
+  text-decoration:none;
+}
+
+.btn.secondary{
+  background:#fff;
+  color:var(--blue);
+  border-color:#c9d7ed;
+}
+
+.btn.secondary:hover{
+  background:var(--blue-light);
+}
+
+.btn.danger{
+  background:#fff;
+  color:var(--red);
+  border-color:#efc7c2;
+}
+
+.btn.danger:hover{
+  background:#fff4f2;
+}
+
+form{
+  margin:0;
+}
+
+label{
+  display:block;
+  margin:14px 0 7px;
+  font-weight:800;
+  color:#344054;
+}
+
+input{
+  width:100%;
+  max-width:520px;
+  padding:12px 13px;
+  border:1px solid #cfd7e6;
+  border-radius:10px;
+  background:#fff;
+  color:var(--text);
+  font-size:15px;
+  outline:none;
+}
+
+input:focus{
+  border-color:#7ea4dd;
+  box-shadow:0 0 0 3px rgba(23,75,155,.10);
+}
+
+input[type="date"]{
+  max-width:240px;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(185px,1fr));
+  gap:12px;
+}
+
+.slot{
+  background:#fff;
+  border:1px solid #dbe4f2;
+  border-radius:13px;
+  padding:16px;
+  text-align:center;
+}
+
+.slot:hover{
+  border-color:#9db8df;
+  box-shadow:0 5px 15px rgba(23,75,155,.08);
+}
+
+.slot-time{
+  font-size:18px;
+  font-weight:900;
+  color:#18345f;
+  margin-bottom:11px;
+}
+
+.slot.busy,
+.slot.past{
+  background:#f7f8fa;
+  border-color:#e5e7eb;
+  color:#8a919d;
+}
+
+.slot.busy:hover,
+.slot.past:hover{
+  box-shadow:none;
+  border-color:#e5e7eb;
+}
+
+.slot-status{
+  font-size:13px;
+  font-weight:800;
+  color:#7b8492;
+}
+
+.ok{
+  border-left:5px solid var(--green);
+}
+
+.warn{
+  border-left:5px solid var(--orange);
+}
+
+.error{
+  border-left:5px solid var(--red);
+}
+
+.notice{
+  padding:13px 15px;
+  background:var(--blue-light);
+  border:1px solid #d7e5fb;
+  border-radius:10px;
+  color:#315486;
+  margin-top:15px;
 }
 
 table{
   width:100%;
-  border-collapse:collapse;
-  margin-top:15px;
+  border-collapse:separate;
+  border-spacing:0;
+  overflow:hidden;
+  border:1px solid var(--line);
+  border-radius:12px;
 }
 
 th{
-  background:#163b73;
-  color:white;
-  padding:12px;
+  background:#f1f5fb;
+  color:#334155;
+  padding:13px;
   text-align:left;
+  font-size:13px;
 }
 
 td{
-  padding:12px;
-  border-bottom:1px solid #ddd;
+  padding:13px;
+  border-top:1px solid var(--line);
+  vertical-align:middle;
 }
 
-button{
-  background:#163b73;
-  color:white;
+.badge{
+  display:inline-block;
+  padding:5px 9px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:900;
+  background:#eef2f7;
+  color:#667085;
+}
+
+.badge.ok{
   border:0;
-  padding:9px 16px;
-  border-radius:7px;
-  cursor:pointer;
-  font-weight:bold;
+  background:#e9f8f0;
+  color:#147a4b;
 }
 
-button:hover{
-  background:#24549a;
+.badge.warn{
+  border:0;
+  background:#fff4dc;
+  color:#996000;
+}
+
+.badge.error{
+  border:0;
+  background:#fff0ee;
+  color:#b33226;
 }
 
 @media(max-width:700px){
-  main{
-    padding:0 10px;
+
+  .brand{
+    padding:18px 15px 14px;
   }
 
+  .nav{
+    padding:0 15px 14px;
+  }
+
+  main{
+    padding:0 12px;
+    margin-top:18px;
+  }
+
+  .hero,
   .card{
-    padding:15px;
-    overflow-x:auto;
+    padding:18px;
+    border-radius:14px;
+  }
+
+  .hero h1{
+    font-size:25px;
   }
 
   table{
-    min-width:650px;
+    display:block;
+    overflow-x:auto;
+    white-space:nowrap;
   }
 }
 </style>
 </head>
 <body>
-<header>
-<h1>TuRU 1880 Padel</h1>
-<div>Blau. Weiß. Düsseldorf.</div>
+
+<header class="topbar">
+
+  <div class="brand">
+
+    <div class="brand-mark">
+      TuRU
+    </div>
+
+    <div>
+      <div class="brand-title">
+        TuRU 1880 Padel
+      </div>
+
+      <div class="brand-sub">
+        Blau. Weiß. Düsseldorf.
+      </div>
+    </div>
+
+  </div>
+
+  ${nav(req)}
+
 </header>
-<main>${body}</main>
+
+<main>
+${body}
+</main>
+
 </body>
 </html>`;
 }
-
 function nav(req) {
-  if (!req.session.member) {
-    return `<div class="nav">
-      <a href="/">Buchung</a>
-      <a href="/register">Registrieren</a>
+  if (!req?.session?.member) {
+    return `<nav class="nav">
+      <a class="primary" href="/">Startseite</a>
       <a href="/login">Mitglieder-Login</a>
-    </div>`;
+      <a href="/register">Registrieren</a>
+    </nav>`;
   }
 
-  return `<div class="nav">
-    <a href="/">Buchung</a>
+  return `<nav class="nav">
+    <a class="primary" href="/booking">Platz buchen</a>
     <a href="/my-bookings">Meine Buchungen</a>
-    ${req.session.member.admin ? '<a href="/admin">Admin</a>' : ""}
-    <form method="post" action="/logout" style="margin:0">
-      <button style="width:auto">Abmelden</button>
+    ${req.session.member.admin ? '<a href="/admin">Administration</a>' : ""}
+    <form method="post" action="/logout">
+      <button type="submit">Abmelden</button>
     </form>
-  </div>`;
+  </nav>`;
 }
 
 function loginRequired(req, res, next) {
   if (!req.session.member) {
     return res.redirect("/login");
   }
+
   next();
 }
 
@@ -182,7 +558,11 @@ function adminRequired(req, res, next) {
       page(
         "Kein Zugriff",
         nav(req) +
-        '<div class="card error"><h2>Kein Zugriff</h2></div>'
+        '<div class="card error">' +
+        '<h2>Kein Zugriff</h2>' +
+        '<p>Dieser Bereich ist nur für Administratoren verfügbar.</p>' +
+        '</div>',
+        req
       )
     );
   }
@@ -194,6 +574,7 @@ function slots() {
   const result = [];
 
   for (let minutes = 9 * 60; minutes < 22 * 60; minutes += 90) {
+
     const formatTime = value =>
       String(Math.floor(value / 60)).padStart(2, "0") +
       ":" +
@@ -209,6 +590,7 @@ function slots() {
 }
 
 async function initDb() {
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS members(
       id SERIAL PRIMARY KEY,
@@ -262,6 +644,7 @@ async function initDb() {
       admin
     )
     VALUES($1,$2,$3,'approved',TRUE)
+
     ON CONFLICT(email)
     DO UPDATE SET
       admin=TRUE,
@@ -273,213 +656,493 @@ async function initDb() {
     hash
   ]);
 }
+
+
 app.get("/", (req, res) => {
+
   const content = req.session.member
+
     ? `
+      <section class="hero">
+
+        <h1>Willkommen bei TuRU 1880 Padel</h1>
+
+        <p>
+          Hallo <b>${esc(req.session.member.name)}</b>,
+          hier kannst du deinen Padelplatz einfach und schnell buchen.
+        </p>
+
+        <div class="actions">
+
+          <a class="btn" href="/booking">
+            🎾 Platz buchen
+          </a>
+
+          <a class="btn secondary" href="/my-bookings">
+            Meine Buchungen
+          </a>
+
+        </div>
+
+      </section>
+
       <div class="card">
-        <h2>TuRU 1880 Padel</h2>
-        <p>Angemeldet als <b>${esc(req.session.member.name)}</b></p>
-        <p><a href="/booking">🎾 Platz buchen</a></p>
+
+        <h2>Deine Buchung</h2>
+
+        <p class="muted">
+          Wähle einen freien Termin.
+          Vergangene Termine können nicht gebucht werden.
+        </p>
+
       </div>
     `
+
     : `
+      <section class="hero">
+
+        <h1>TuRU 1880 Padel</h1>
+
+        <p>
+          Die Buchungsseite für die Padelplätze
+          von TuRU 1880 Düsseldorf.
+        </p>
+
+        <p>
+          Padelplätze können ausschließlich von
+          freigeschalteten Mitgliedern gebucht werden.
+        </p>
+
+        <div class="actions">
+
+          <a class="btn" href="/login">
+            Mitglieder-Login
+          </a>
+
+          <a class="btn secondary" href="/register">
+            Mitglied registrieren
+          </a>
+
+        </div>
+
+      </section>
+
       <div class="card">
-        <h2>TuRU 1880 Padel</h2>
-        <p>Willkommen bei der Padel-Buchung von TuRU 1880.</p>
-        <p>Padelplätze können ausschließlich von freigeschalteten Mitgliedern gebucht werden.</p>
-        <p><a href="/login">🔐 Anmelden</a></p>
-        <p><a href="/register">📝 Mitglied registrieren</a></p>
+
+        <h2>So funktioniert es</h2>
+
+        <p class="muted">
+          Registrieren, vom Administrator freischalten lassen
+          und anschließend einen freien Termin auswählen.
+        </p>
+
       </div>
     `;
 
-  res.send(page("Startseite", nav(req) + content));
+  res.send(
+    page(
+      "Startseite",
+      content,
+      req
+    )
+  );
 });
+
 
 app.get("/register", (req, res) => {
-  res.send(page("Registrierung", nav(req) + `
-    <div class="card">
-      <h2>Mitglied registrieren</h2>
-      <p>Nach der Registrierung muss der Administrator dein Konto freischalten.</p>
 
-      <form method="post" action="/register">
-        <label>Name</label>
-        <input name="name" maxlength="100" required>
+  res.send(
+    page(
+      "Registrierung",
 
-        <label>E-Mail</label>
-        <input type="email" name="email" maxlength="200" required>
+      `
+      <div class="card">
 
-        <label>Passwort</label>
-        <input type="password" name="password" minlength="8" required>
+        <h2>Mitglied registrieren</h2>
 
-        <button type="submit">Registrieren</button>
-      </form>
-    </div>
-  `));
+        <p class="muted">
+          Nach der Registrierung muss der Administrator
+          dein Konto freischalten.
+        </p>
+
+        <form method="post" action="/register">
+
+          <label>Name</label>
+
+          <input
+            name="name"
+            maxlength="100"
+            required
+          >
+
+          <label>E-Mail</label>
+
+          <input
+            type="email"
+            name="email"
+            maxlength="200"
+            required
+          >
+
+          <label>Passwort</label>
+
+          <input
+            type="password"
+            name="password"
+            minlength="8"
+            required
+          >
+
+          <div class="actions">
+
+            <button class="btn" type="submit">
+              Registrierung senden
+            </button>
+
+            <a class="btn secondary" href="/login">
+              Zum Login
+            </a>
+
+          </div>
+
+        </form>
+
+      </div>
+      `,
+      req
+    )
+  );
 });
 
+
 app.post("/register", async (req, res) => {
+
   try {
-    const name = String(req.body.name || "").trim();
-    const email = String(req.body.email || "").trim().toLowerCase();
-    const password = String(req.body.password || "");
+
+    const name =
+      String(req.body.name || "").trim();
+
+    const email =
+      String(req.body.email || "")
+        .trim()
+        .toLowerCase();
+
+    const password =
+      String(req.body.password || "");
+
 
     if (!name || !email || password.length < 8) {
+
       return res.status(400).send(
+
         page(
           "Fehler",
+
           nav(req) +
-          '<div class="card error"><h2>Fehler</h2>' +
-          '<p>Bitte alle Angaben ausfüllen. Passwort mindestens 8 Zeichen.</p></div>'
+
+          '<div class="card error">' +
+          '<h2>Fehler</h2>' +
+          '<p>Bitte alle Angaben ausfüllen. Passwort mindestens 8 Zeichen.</p>' +
+          '</div>',
+
+          req
         )
       );
     }
+
 
     const existing = await pool.query(
       "SELECT id FROM members WHERE email=$1",
       [email]
     );
 
+
     if (existing.rowCount) {
+
       return res.status(409).send(
+
         page(
           "Account vorhanden",
+
           nav(req) +
-          '<div class="card warn"><h2>Account vorhanden</h2>' +
+
+          '<div class="card warn">' +
+          '<h2>Account vorhanden</h2>' +
           '<p>Diese E-Mail ist bereits registriert.</p>' +
-          '<a href="/login">Zum Login</a></div>'
+          '<a class="btn secondary" href="/login">Zum Login</a>' +
+          '</div>',
+
+          req
         )
       );
     }
+
 
     const count = await pool.query(
       "SELECT COUNT(*)::int AS n FROM members WHERE status='approved'"
     );
 
+
     if (count.rows[0].n >= 100) {
+
       return res.status(409).send(
+
         page(
           "Aufnahmestopp",
+
           nav(req) +
-          '<div class="card warn"><h2>100 Mitglieder erreicht</h2>' +
-          '<p>Momentan können keine weiteren Mitglieder freigeschaltet werden.</p></div>'
+
+          '<div class="card warn">' +
+          '<h2>100 Mitglieder erreicht</h2>' +
+          '<p>Momentan können keine weiteren Mitglieder freigeschaltet werden.</p>' +
+          '</div>',
+
+          req
         )
       );
     }
 
-    const hash = await bcrypt.hash(password, 12);
+
+    const hash =
+      await bcrypt.hash(password, 12);
+
 
     await pool.query(
+
       "INSERT INTO members(name,email,password_hash,status) VALUES($1,$2,$3,'pending')",
-      [name, email, hash]
+
+      [
+        name,
+        email,
+        hash
+      ]
+
     );
 
+
     res.send(
+
       page(
         "Registrierung",
+
         nav(req) +
-        '<div class="card ok"><h2>✅ Registrierung erfolgreich</h2>' +
-        '<p>Dein Account wartet jetzt auf die Freischaltung durch den Administrator.</p></div>'
+
+        '<div class="card ok">' +
+        '<h2>Registrierung erfolgreich</h2>' +
+        '<p>Dein Account wartet jetzt auf die Freischaltung durch den Administrator.</p>' +
+        '<div class="actions">' +
+        '<a class="btn secondary" href="/login">Zum Login</a>' +
+        '</div>' +
+        '</div>',
+
+        req
       )
     );
+
   } catch (error) {
+
     console.error(error);
-    res.status(500).send("Serverfehler");
+
+    res.status(500).send(
+      "Serverfehler"
+    );
   }
 });
 
+
 app.get("/login", (req, res) => {
-  res.send(page("Login", nav(req) + `
-    <div class="card">
-      <h2>Mitglieder-Login</h2>
 
-      <form method="post" action="/login">
-        <label>E-Mail</label>
-        <input type="email" name="email" required>
+  res.send(
 
-        <label>Passwort</label>
-        <input type="password" name="password" required>
+    page(
+      "Login",
 
-        <button type="submit">Anmelden</button>
-      </form>
+      `
+      <div class="card">
 
-      <p>Noch nicht registriert?
-        <a href="/register">Registrieren</a>
-      </p>
-    </div>
-  `));
+        <h2>Mitglieder-Login</h2>
+
+        <form method="post" action="/login">
+
+          <label>E-Mail</label>
+
+          <input
+            type="email"
+            name="email"
+            required
+          >
+
+          <label>Passwort</label>
+
+          <input
+            type="password"
+            name="password"
+            required
+          >
+
+          <div class="actions">
+
+            <button class="btn" type="submit">
+              Anmelden
+            </button>
+
+            <a class="btn secondary" href="/register">
+              Registrieren
+            </a>
+
+          </div>
+
+        </form>
+
+      </div>
+      `,
+      req
+    )
+
+  );
 });
 
+
 app.post("/login", async (req, res) => {
+
   try {
-    const email = String(req.body.email || "").trim().toLowerCase();
-    const password = String(req.body.password || "");
+
+    const email =
+      String(req.body.email || "")
+        .trim()
+        .toLowerCase();
+
+    const password =
+      String(req.body.password || "");
+
 
     const result = await pool.query(
+
       "SELECT * FROM members WHERE email=$1",
+
       [email]
+
     );
 
-    const member = result.rows[0];
+
+    const member =
+      result.rows[0];
+
 
     if (
       !member ||
-      !(await bcrypt.compare(password, member.password_hash))
+      !(await bcrypt.compare(
+        password,
+        member.password_hash
+      ))
     ) {
+
       return res.status(401).send(
+
         page(
           "Login",
-          '<div class="card error">' +
-          '<h2>Login fehlgeschlagen</h2>' +
-          '<p>E-Mail oder Passwort ist falsch.</p>' +
-          '<p><a href="/login">Zurück zum Login</a></p>' +
-          '</div>'
+
+          `
+          <div class="card error">
+
+            <h2>Login fehlgeschlagen</h2>
+
+            <p>
+              E-Mail oder Passwort ist falsch.
+            </p>
+
+            <div class="actions">
+
+              <a class="btn secondary" href="/login">
+                Zurück zum Login
+              </a>
+
+            </div>
+
+          </div>
+          `,
+
+          req
         )
       );
     }
+
 
     if (member.status !== "approved") {
+
       return res.status(403).send(
+
         page(
           "Nicht freigeschaltet",
-          '<div class="card warn">' +
-          '<h2>Noch nicht freigeschaltet</h2>' +
-          '<p>Dein Account wartet noch auf die Freischaltung durch den Administrator.</p>' +
-          '</div>'
+
+          `
+          <div class="card warn">
+
+            <h2>Noch nicht freigeschaltet</h2>
+
+            <p>
+              Dein Account wartet noch auf die
+              Freischaltung durch den Administrator.
+            </p>
+
+          </div>
+          `,
+
+          req
         )
       );
     }
 
+
     req.session.member = {
+
       id: member.id,
+
       name: member.name,
+
       email: member.email,
+
       admin: member.admin
+
     };
 
+
     res.redirect("/");
+
   } catch (error) {
+
     console.error(error);
-    res.status(500).send("Serverfehler");
+
+    res.status(500).send(
+      "Serverfehler"
+    );
   }
 });
 
-app.post("/logout", (req, res) => {
-  req.session.destroy(() => {
-    res.redirect("/");
-  });
-});
 
+app.post("/logout", (req, res) => {
+
+  req.session.destroy(() => {
+
+    res.redirect("/");
+
+  });
+
+});
 app.get("/booking", loginRequired, async (req, res) => {
   try {
+
     let date = String(req.query.date || "");
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      date = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Europe/Berlin",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-      }).format(new Date());
+      date = berlinDate();
+    }
+
+    const today = berlinDate();
+
+    // Vergangene Tage automatisch auf heute setzen
+    if (date < today) {
+      date = today;
     }
 
     const result = await pool.query(
@@ -494,112 +1157,350 @@ app.get("/booking", loginRequired, async (req, res) => {
     );
 
     const html = slots().map(slot => {
-      if (busy.has(slot.start)) {
+
+      // Vergangene Uhrzeiten sperren
+      if (isPastSlot(date, slot.start)) {
+
         return `
-          <div class="slot busy">
-            <b>${slot.start}-${slot.end}</b>
-            <br>
-            <span>belegt</span>
+          <div class="slot past">
+
+            <div class="slot-time">
+              ${slot.start}-${slot.end}
+            </div>
+
+            <div class="slot-status">
+              Nicht mehr buchbar
+            </div>
+
           </div>
         `;
       }
 
+
+      // Bereits belegte Zeiten
+      if (busy.has(slot.start)) {
+
+        return `
+          <div class="slot busy">
+
+            <div class="slot-time">
+              ${slot.start}-${slot.end}
+            </div>
+
+            <div class="slot-status">
+              Bereits belegt
+            </div>
+
+          </div>
+        `;
+      }
+
+
+      // Freie Zeit
       return `
         <div class="slot">
-          <b>${slot.start}-${slot.end}</b>
+
+          <div class="slot-time">
+            ${slot.start}-${slot.end}
+          </div>
+
           <form method="post" action="/book">
-            <input type="hidden" name="date" value="${esc(date)}">
-            <input type="hidden" name="start" value="${esc(slot.start)}">
-            <input type="hidden" name="end" value="${esc(slot.end)}">
-            <button type="submit">Buchen</button>
+
+            <input
+              type="hidden"
+              name="date"
+              value="${esc(date)}"
+            >
+
+            <input
+              type="hidden"
+              name="start"
+              value="${esc(slot.start)}"
+            >
+
+            <input
+              type="hidden"
+              name="end"
+              value="${esc(slot.end)}"
+            >
+
+            <button
+              class="btn"
+              type="submit"
+            >
+              Jetzt buchen
+            </button>
+
           </form>
+
         </div>
       `;
     }).join("");
 
+
     res.send(
+
       page(
-        "Buchung",
-        nav(req) +
+
+        "Platz buchen",
+
         `
+
+        <div class="hero">
+
+          <h1>🎾 Platz buchen</h1>
+
+          <p>
+            Wähle einen Tag und anschließend
+            eine freie Spielzeit.
+          </p>
+
+        </div>
+
+
         <div class="card">
-          <h2>🎾 Platz buchen</h2>
+
+          <h2>Datum auswählen</h2>
 
           <label for="bookingDate">
-            <b>Datum auswählen</b>
+            Spieltag
           </label>
 
           <input
             type="date"
             id="bookingDate"
             value="${esc(date)}"
-            min="${esc(date)}"
-            onchange="window.location.href='/booking?date='+this.value"
+            min="${esc(today)}"
+            onchange="
+              window.location.href=
+              '/booking?date='+this.value
+            "
           >
 
-          <p>
-            <b>Gewählter Tag:</b> ${esc(date)}
-          </p>
+          <div class="notice">
+
+            Vergangene Tage und bereits
+            vergangene Uhrzeiten sind nicht buchbar.
+
+          </div>
+
         </div>
 
+
         <div class="card">
+
           <h2>Verfügbare Zeiten</h2>
 
           <div class="grid">
+
             ${html}
+
           </div>
+
         </div>
-        `
+
+        `,
+
+        req
+
       )
+
     );
 
   } catch (error) {
+
     console.error(error);
-    res.status(500).send("Serverfehler");
+
+    res.status(500).send(
+      "Serverfehler"
+    );
   }
 });
 
+
 app.post("/book", loginRequired, async (req, res) => {
-  const date = String(req.body.date || "");
-  const start = String(req.body.start || "");
-  const end = String(req.body.end || "");
+
+  const date =
+    String(req.body.date || "");
+
+  const start =
+    String(req.body.start || "");
+
+  const end =
+    String(req.body.end || "");
+
 
   if (!date || !start || !end) {
-    return res.status(400).send("Fehlende Buchungsdaten");
+
+    return res.status(400).send(
+
+      page(
+
+        "Buchungsfehler",
+
+        `
+        <div class="card error">
+
+          <h2>Buchung nicht möglich</h2>
+
+          <p>
+            Die Buchungsdaten sind unvollständig.
+          </p>
+
+          <div class="actions">
+
+            <a
+              class="btn"
+              href="/booking"
+            >
+              Zurück zur Buchung
+            </a>
+
+          </div>
+
+        </div>
+        `,
+
+        req
+
+      )
+
+    );
   }
 
-  const client = await pool.connect();
+
+  // WICHTIG:
+  // Auch bei einem direkten POST dürfen
+  // vergangene Zeiten nicht gebucht werden.
+
+  if (isPastSlot(date, start)) {
+
+    return res.status(409).send(
+
+      page(
+
+        "Buchung nicht möglich",
+
+        `
+        <div class="card warn">
+
+          <h2>Termin nicht mehr buchbar</h2>
+
+          <p>
+            Dieser Termin liegt bereits
+            in der Vergangenheit.
+          </p>
+
+          <div class="actions">
+
+            <a
+              class="btn"
+              href="/booking"
+            >
+              Neue Zeit auswählen
+            </a>
+
+          </div>
+
+        </div>
+        `,
+
+        req
+
+      )
+
+    );
+  }
+
+
+  const client =
+    await pool.connect();
+
 
   try {
+
     await client.query("BEGIN");
 
-    const active = await client.query(
-      `SELECT id
-       FROM bookings
-       WHERE member_id=$1
-       AND used=FALSE
-       AND (booking_date + start_time) > NOW()
-       FOR UPDATE`,
-      [req.session.member.id]
-    );
+
+    // Prüfen, ob das Mitglied bereits
+    // eine aktive Buchung besitzt.
+
+    const active =
+      await client.query(
+
+        `SELECT id
+         FROM bookings
+         WHERE member_id=$1
+         AND used=FALSE
+         AND (booking_date + start_time) > NOW()
+         FOR UPDATE`,
+
+        [
+          req.session.member.id
+        ]
+
+      );
+
 
     if (active.rowCount) {
-      await client.query("ROLLBACK");
+
+      await client.query(
+        "ROLLBACK"
+      );
+
 
       return res.status(409).send(
+
         page(
+
           "Buchung",
-          nav(req) +
-          '<div class="card warn">' +
-          '<h2>Bereits eine aktive Buchung</h2>' +
-          '<p>Du kannst erst wieder buchen, wenn diese Buchung abgelaufen ist.</p>' +
-          '<a href="/my-bookings">Meine Buchungen</a>' +
-          '</div>'
+
+          `
+          <div class="card warn">
+
+            <h2>Bereits eine aktive Buchung</h2>
+
+            <p>
+              Du hast bereits eine aktive
+              Platzbuchung.
+            </p>
+
+            <p class="muted">
+              Du kannst erst wieder buchen,
+              wenn diese Buchung abgelaufen ist.
+            </p>
+
+            <div class="actions">
+
+              <a
+                class="btn secondary"
+                href="/my-bookings"
+              >
+                Meine Buchungen
+              </a>
+
+              <a
+                class="btn"
+                href="/booking"
+              >
+                Zurück zur Buchung
+              </a>
+
+            </div>
+
+          </div>
+          `,
+
+          req
+
         )
+
       );
     }
 
+
     await client.query(
+
       `INSERT INTO bookings(
         member_id,
         booking_date,
@@ -607,345 +1508,932 @@ app.post("/book", loginRequired, async (req, res) => {
         end_time
       )
       VALUES($1,$2,$3,$4)`,
+
       [
         req.session.member.id,
         date,
         start,
         end
       ]
+
     );
 
-    await client.query("COMMIT");
+
+    await client.query(
+      "COMMIT"
+    );
+
 
     res.send(
+
       page(
+
         "Buchung bestätigt",
-        nav(req) +
-        '<div class="card ok">' +
-        '<h2>✅ Buchung bestätigt</h2>' +
-        '<p><b>' +
-        esc(date) +
-        '</b>, ' +
-        esc(start) +
-        '-' +
-        esc(end) +
-        '</p>' +
-        '<a href="/my-bookings">Meine Buchungen</a>' +
-        '</div>'
+
+        `
+        <div class="card ok">
+
+          <h2>✓ Buchung bestätigt</h2>
+
+          <p>
+            Dein Padelplatz ist erfolgreich gebucht.
+          </p>
+
+          <div class="notice">
+
+            <b>${esc(date)}</b>
+            <br>
+            ${esc(start)} – ${esc(end)}
+
+          </div>
+
+          <div class="actions">
+
+            <a
+              class="btn"
+              href="/my-bookings"
+            >
+              Meine Buchungen
+            </a>
+
+            <a
+              class="btn secondary"
+              href="/booking"
+            >
+              Weitere Zeiten
+            </a>
+
+          </div>
+
+        </div>
+        `,
+
+        req
+
       )
+
     );
+
+
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+
+    await client
+      .query("ROLLBACK")
+      .catch(() => {});
+
+
+    // Termin wurde gleichzeitig
+    // von jemand anderem gebucht.
 
     if (error.code === "23505") {
+
       return res.status(409).send(
+
         page(
-          "Buchung",
-          nav(req) +
-          '<div class="card error">' +
-          '<h2>Slot bereits belegt</h2>' +
-          '<p>Dieser Termin wurde gerade vergeben.</p>' +
-          '</div>'
+
+          "Termin belegt",
+
+          `
+          <div class="card error">
+
+            <h2>Termin bereits belegt</h2>
+
+            <p>
+              Dieser Termin wurde gerade
+              von einem anderen Mitglied gebucht.
+            </p>
+
+            <div class="actions">
+
+              <a
+                class="btn"
+                href="/booking"
+              >
+                Andere Zeit auswählen
+              </a>
+
+            </div>
+
+          </div>
+          `,
+
+          req
+
         )
+
       );
     }
 
+
     console.error(error);
-    res.status(500).send("Serverfehler");
-  } finally {
-    client.release();
-  }
-});
-app.get("/my-bookings", loginRequired, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT *
-       FROM bookings
-       WHERE member_id=$1
-       ORDER BY booking_date,start_time`,
-      [req.session.member.id]
+
+    res.status(500).send(
+      "Serverfehler"
     );
 
-    const now = new Date();
 
-const rows = result.rows.map(booking => {
- const date = booking.booking_date instanceof Date
-  ? booking.booking_date.toISOString().slice(0, 10)
-  : String(booking.booking_date).slice(0, 10);
-  const start = String(booking.start_time).slice(0, 5);
-  const end = String(booking.end_time).slice(0, 5);
-const bookingDate = new Date(`${date}T${start}:00`);
-console.log("BOOKING DEBUG:", {
-  date,
-  start,
-  bookingDate: bookingDate.toString(),
-  now: now.toString(),
-  comparison: bookingDate > now
-});  const status = booking.used
-    ? "genutzt"
-    : bookingDate > now
-    ? "gebucht"
-    : "abgelaufen";
-      const cancelButton =
-        !booking.used && bookingDate > now
-          ? '<form method="post" action="/cancel/' +
-            booking.id +
-            '"><button type="submit">Stornieren</button></form>'
-          : "";
+  } finally {
 
-      return (
-        "<tr>" +
-        "<td>" + esc(date) + "</td>" +
-        "<td>" + esc(start) + "-" + esc(end) + "</td>" +
-        "<td>" + status + "</td>" +
-        "<td>" + cancelButton + "</td>" +
-        "</tr>"
+    client.release();
+
+  }
+
+});
+
+
+app.get("/my-bookings", loginRequired, async (req, res) => {
+
+  try {
+
+    const result =
+      await pool.query(
+
+        `SELECT *
+         FROM bookings
+         WHERE member_id=$1
+         ORDER BY booking_date,start_time`,
+
+        [
+          req.session.member.id
+        ]
+
       );
-    }).join("");
 
-    const table = rows
-      ? '<table>' +
-        '<tr><th>Datum</th><th>Zeit</th><th>Status</th><th></th></tr>' +
-        rows +
-        "</table>"
-      : "<p>Keine Buchungen.</p>";
+
+    const now =
+      new Date();
+
+
+    const rows =
+      result.rows.map(booking => {
+
+        const date =
+          booking.booking_date instanceof Date
+
+            ? booking.booking_date
+                .toISOString()
+                .slice(0, 10)
+
+            : String(
+                booking.booking_date
+              ).slice(0, 10);
+
+
+        const start =
+          String(
+            booking.start_time
+          ).slice(0, 5);
+
+
+        const end =
+          String(
+            booking.end_time
+          ).slice(0, 5);
+
+
+        const bookingDate =
+          new Date(
+            `${date}T${start}:00`
+          );
+
+
+        const status =
+          booking.used
+
+            ? "genutzt"
+
+            : bookingDate > now
+
+              ? "gebucht"
+
+              : "abgelaufen";
+
+
+        const badgeClass =
+
+          status === "gebucht"
+
+            ? "ok"
+
+            : status === "abgelaufen"
+
+              ? "warn"
+
+              : "";
+
+
+        const cancelButton =
+
+          !booking.used &&
+          bookingDate > now
+
+            ? `
+              <form
+                method="post"
+                action="/cancel/${booking.id}"
+              >
+
+                <button
+                  class="btn danger"
+                  type="submit"
+                >
+                  Stornieren
+                </button>
+
+              </form>
+              `
+
+            : "";
+
+
+        return (
+
+          "<tr>" +
+
+          "<td>" +
+          esc(date) +
+          "</td>" +
+
+          "<td><b>" +
+          esc(start) +
+          "-" +
+          esc(end) +
+          "</b></td>" +
+
+          '<td>' +
+
+          '<span class="badge ' +
+          badgeClass +
+          '">' +
+
+          esc(status) +
+
+          "</span>" +
+
+          "</td>" +
+
+          "<td>" +
+          cancelButton +
+          "</td>" +
+
+          "</tr>"
+
+        );
+
+      }).join("");
+
+
+    const table =
+
+      result.rows.length
+
+        ? `
+          <table>
+
+            <thead>
+
+              <tr>
+
+                <th>Datum</th>
+                <th>Zeit</th>
+                <th>Status</th>
+                <th>Aktion</th>
+
+              </tr>
+
+            </thead>
+
+            <tbody>
+
+              ${rows}
+
+            </tbody>
+
+          </table>
+          `
+
+        : `
+          <p class="muted">
+            Du hast noch keine Buchungen.
+          </p>
+          `;
+
 
     res.send(
-      page(
-        "Meine Buchungen",
-        nav(req) +
-        '<div class="card">' +
-        '<h2>Meine Buchungen</h2>' +
-        table +
-        "</div>"
-      )
-    );
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Serverfehler");
-  }
-});
 
+      page(
+
+        "Meine Buchungen",
+
+        `
+
+        <div class="hero">
+
+          <h1>Meine Buchungen</h1>
+
+          <p>
+            Hier findest du deine gebuchten
+            Padelzeiten.
+          </p>
+
+        </div>
+
+
+        <div class="card">
+
+          ${table}
+
+        </div>
+
+        `,
+
+        req
+
+      )
+
+    );
+
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).send(
+      "Serverfehler"
+    );
+
+  }
+
+});
 app.post("/cancel/:id", loginRequired, async (req, res) => {
+
   try {
+
     const result = await pool.query(
+
       `DELETE FROM bookings
        WHERE id=$1
        AND member_id=$2
        AND used=FALSE
        AND (booking_date + start_time)>NOW()
        RETURNING *`,
+
       [
         req.params.id,
         req.session.member.id
       ]
+
     );
 
+
     if (!result.rowCount) {
+
       return res.status(404).send(
+
         page(
+
           "Stornierung",
-          nav(req) +
-          '<div class="card error">' +
-          '<h2>Stornierung nicht möglich</h2>' +
-          '<p>Die Buchung wurde nicht gefunden oder ist bereits abgelaufen.</p>' +
-          '</div>'
+
+          `
+          <div class="card error">
+
+            <h2>Stornierung nicht möglich</h2>
+
+            <p>
+              Die Buchung wurde nicht gefunden
+              oder ist bereits abgelaufen.
+            </p>
+
+            <div class="actions">
+
+              <a
+                class="btn secondary"
+                href="/my-bookings"
+              >
+                Meine Buchungen
+              </a>
+
+            </div>
+
+          </div>
+          `,
+
+          req
+
         )
+
       );
+
     }
 
+
     res.redirect("/my-bookings");
+
+
   } catch (error) {
+
     console.error(error);
-    res.status(500).send("Serverfehler");
+
+    res.status(500).send(
+      "Serverfehler"
+    );
+
   }
+
 });
 
+
 app.get("/admin", adminRequired, async (req, res) => {
+
   try {
-    const [membersResult, bookingsResult] =
-      await Promise.all([
-        pool.query(
-          `SELECT id,name,email,status,admin,created_at
-           FROM members
-           ORDER BY created_at DESC`
-        ),
-        pool.query(
-          `SELECT b.*,m.name,m.email
-           FROM bookings b
-           JOIN members m ON m.id=b.member_id
-           ORDER BY b.booking_date,b.start_time`
-        )
-      ]);
 
-    const members = membersResult.rows.map(member => {
-      let action = "";
+    const [
+      membersResult,
+      bookingsResult
+    ] = await Promise.all([
 
-      if (member.admin) {
-        action = "Administrator";
-      } else if (member.status === "pending") {
-        action =
-          '<form method="post" action="/admin/approve/' +
-          member.id +
+      pool.query(
+
+        `SELECT
+          id,
+          name,
+          email,
+          status,
+          admin,
+          created_at
+         FROM members
+         ORDER BY created_at DESC`
+
+      ),
+
+      pool.query(
+
+        `SELECT
+          b.*,
+          m.name,
+          m.email
+         FROM bookings b
+         JOIN members m
+         ON m.id=b.member_id
+         ORDER BY
+          b.booking_date,
+          b.start_time`
+
+      )
+
+    ]);
+
+
+    const members =
+      membersResult.rows.map(member => {
+
+        let action = "";
+
+
+        if (member.admin) {
+
+          action =
+            '<span class="badge ok">' +
+            'Administrator' +
+            '</span>';
+
+        }
+
+        else if (
+          member.status === "pending"
+        ) {
+
+          action =
+
+            '<form method="post" action="/admin/approve/' +
+            member.id +
+            '">' +
+
+            '<button class="btn" type="submit">' +
+            'Freigeben' +
+            '</button>' +
+
+            '</form>';
+
+        }
+
+        else if (
+          member.status === "approved"
+        ) {
+
+          action =
+
+            '<form method="post" action="/admin/block/' +
+            member.id +
+            '">' +
+
+            '<button class="btn danger" type="submit">' +
+            'Sperren' +
+            '</button>' +
+
+            '</form>';
+
+        }
+
+        else {
+
+          action =
+            '<span class="badge error">' +
+            'Gesperrt' +
+            '</span>';
+
+        }
+
+
+        return (
+
+          "<tr>" +
+
+          "<td>" +
+          esc(member.name) +
+          "</td>" +
+
+          "<td>" +
+          esc(member.email) +
+          "</td>" +
+
+          "<td>" +
+          esc(member.status) +
+          "</td>" +
+
+          "<td>" +
+          action +
+          "</td>" +
+
+          "</tr>"
+
+        );
+
+      }).join("");
+
+
+    const bookings =
+      bookingsResult.rows.map(booking => {
+
+        return (
+
+          "<tr>" +
+
+          "<td>" +
+          esc(booking.booking_date) +
+          "</td>" +
+
+          "<td><b>" +
+
+          String(
+            booking.start_time
+          ).slice(0, 5) +
+
+          "-" +
+
+          String(
+            booking.end_time
+          ).slice(0, 5) +
+
+          "</b></td>" +
+
+          "<td>" +
+          esc(booking.name) +
+          "</td>" +
+
+          "<td>" +
+          esc(booking.email) +
+          "</td>" +
+
+          "<td>" +
+
+          '<form method="post" action="/admin/cancel-booking/' +
+          booking.id +
           '">' +
-          '<button type="submit">Freigeben</button>' +
-          "</form>";
-      } else if (member.status === "approved") {
-        action =
-          '<form method="post" action="/admin/block/' +
-          member.id +
-          '">' +
-          '<button type="submit">Sperren</button>' +
-          "</form>";
-      } else {
-        action = "Gesperrt";
-      }
 
-      return (
-        "<tr>" +
-        "<td>" + esc(member.name) + "</td>" +
-        "<td>" + esc(member.email) + "</td>" +
-        "<td>" + esc(member.status) + "</td>" +
-        "<td>" + action + "</td>" +
-        "</tr>"
-      );
-    }).join("");
+          '<button class="btn danger" type="submit">' +
+          'Stornieren' +
+          '</button>' +
 
-    const bookings = bookingsResult.rows.map(booking => {
-      return (
-        "<tr>" +
-        "<td>" + esc(booking.booking_date) + "</td>" +
-        "<td>" +
-        String(booking.start_time).slice(0, 5) +
-        "-" +
-        String(booking.end_time).slice(0, 5) +
-        "</td>" +
-        "<td>" + esc(booking.name) + "</td>" +
-        "<td>" + esc(booking.email) + "</td>" +
-        "<td>" +
-        '<form method="post" action="/admin/cancel-booking/' +
-        booking.id +
-        '">' +
-        '<button type="submit">Stornieren</button>' +
-        "</form>" +
-        "</td>" +
-        "</tr>"
-      );
-    }).join("");
+          "</form>" +
+
+          "</td>" +
+
+          "</tr>"
+
+        );
+
+      }).join("");
+
 
     const approved =
       membersResult.rows.filter(
-        member => member.status === "approved"
+        member =>
+          member.status === "approved"
       ).length;
+
 
     const pending =
       membersResult.rows.filter(
-        member => member.status === "pending"
+        member =>
+          member.status === "pending"
       ).length;
 
+
     res.send(
+
       page(
-        "Admin",
-        nav(req) +
-        '<div class="card">' +
-        "<h2>Administrator</h2>" +
-        "<p>Freigegeben: <b>" +
-        approved +
-        "</b> | Wartend: <b>" +
-        pending +
-        "</b></p>" +
-        "</div>" +
 
-        '<div class="card">' +
-        "<h2>Mitglieder</h2>" +
-        "<table>" +
-        "<tr><th>Name</th><th>E-Mail</th><th>Status</th><th>Aktion</th></tr>" +
-        members +
-        "</table>" +
-        "</div>" +
+        "Administration",
 
-        '<div class="card">' +
-        "<h2>Alle Buchungen</h2>" +
-        "<table>" +
-        "<tr><th>Datum</th><th>Zeit</th><th>Name</th><th>E-Mail</th><th>Aktion</th></tr>" +
-        bookings +
-        "</table>" +
-        "</div>"
+        `
+
+        <div class="hero">
+
+          <h1>Administration</h1>
+
+          <p>
+            Mitglieder und Buchungen verwalten.
+          </p>
+
+        </div>
+
+
+        <div class="card">
+
+          <h2>Übersicht</h2>
+
+          <p>
+
+            <b>${approved}</b>
+            freigeschaltete Mitglieder
+
+            ·
+
+            <b>${pending}</b>
+            wartende Registrierungen
+
+          </p>
+
+        </div>
+
+
+        <div class="card">
+
+          <h2>Mitglieder</h2>
+
+          <table>
+
+            <thead>
+
+              <tr>
+
+                <th>Name</th>
+                <th>E-Mail</th>
+                <th>Status</th>
+                <th>Aktion</th>
+
+              </tr>
+
+            </thead>
+
+            <tbody>
+
+              ${members}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+
+        <div class="card">
+
+          <h2>Alle Buchungen</h2>
+
+          <table>
+
+            <thead>
+
+              <tr>
+
+                <th>Datum</th>
+                <th>Zeit</th>
+                <th>Name</th>
+                <th>E-Mail</th>
+                <th>Aktion</th>
+
+              </tr>
+
+            </thead>
+
+            <tbody>
+
+              ${bookings}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+        `,
+
+        req
+
       )
+
     );
+
+
   } catch (error) {
+
     console.error(error);
-    res.status(500).send("Serverfehler");
+
+    res.status(500).send(
+      "Serverfehler"
+    );
+
   }
+
 });
 
-app.post("/admin/approve/:id", adminRequired, async (req, res) => {
-  try {
-    const count = await pool.query(
-      "SELECT COUNT(*)::int AS n FROM members WHERE status='approved'"
-    );
 
-    if (count.rows[0].n >= 100) {
-      return res.status(409).send(
-        page(
-          "Admin",
-          nav(req) +
-          '<div class="card warn">' +
-          "<h2>100 Mitglieder erreicht</h2>" +
-          "</div>"
-        )
+app.post(
+  "/admin/approve/:id",
+  adminRequired,
+  async (req, res) => {
+
+    try {
+
+      const count =
+        await pool.query(
+
+          "SELECT COUNT(*)::int AS n FROM members WHERE status='approved'"
+
+        );
+
+
+      if (
+        count.rows[0].n >= 100
+      ) {
+
+        return res.status(409).send(
+
+          page(
+
+            "Admin",
+
+            `
+            <div class="card warn">
+
+              <h2>
+                100 Mitglieder erreicht
+              </h2>
+
+              <p>
+                Es können keine weiteren
+                Mitglieder freigeschaltet werden.
+              </p>
+
+            </div>
+            `,
+
+            req
+
+          )
+
+        );
+
+      }
+
+
+      await pool.query(
+
+        "UPDATE members SET status='approved' WHERE id=$1 AND admin=FALSE",
+
+        [
+          req.params.id
+        ]
+
       );
+
+
+      res.redirect("/admin");
+
+
+    } catch (error) {
+
+      console.error(error);
+
+      res.status(500).send(
+        "Serverfehler"
+      );
+
     }
 
-    await pool.query(
-      "UPDATE members SET status='approved' WHERE id=$1 AND admin=FALSE",
-      [req.params.id]
-    );
-
-    res.redirect("/admin");
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Serverfehler");
   }
-});
+);
 
-app.post("/admin/block/:id", adminRequired, async (req, res) => {
-  try {
-    await pool.query(
-      "UPDATE members SET status='blocked' WHERE id=$1 AND admin=FALSE",
-      [req.params.id]
-    );
 
-    res.redirect("/admin");
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Serverfehler");
+app.post(
+  "/admin/block/:id",
+  adminRequired,
+  async (req, res) => {
+
+    try {
+
+      await pool.query(
+
+        "UPDATE members SET status='blocked' WHERE id=$1 AND admin=FALSE",
+
+        [
+          req.params.id
+        ]
+
+      );
+
+
+      res.redirect("/admin");
+
+
+    } catch (error) {
+
+      console.error(error);
+
+      res.status(500).send(
+        "Serverfehler"
+      );
+
+    }
+
   }
-});
+);
 
-app.post("/admin/cancel-booking/:id", adminRequired, async (req, res) => {
-  try {
-    await pool.query(
-      "DELETE FROM bookings WHERE id=$1",
-      [req.params.id]
-    );
 
-    res.redirect("/admin");
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Serverfehler");
+app.post(
+  "/admin/cancel-booking/:id",
+  adminRequired,
+  async (req, res) => {
+
+    try {
+
+      await pool.query(
+
+        "DELETE FROM bookings WHERE id=$1",
+
+        [
+          req.params.id
+        ]
+
+      );
+
+
+      res.redirect("/admin");
+
+
+    } catch (error) {
+
+      console.error(error);
+
+      res.status(500).send(
+        "Serverfehler"
+      );
+
+    }
+
   }
-});
+);
+
 
 initDb()
+
   .then(() => {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(
-        "TuRU Padel läuft auf Port " + PORT
-      );
-    });
+
+    app.listen(
+      PORT,
+      "0.0.0.0",
+      () => {
+
+        console.log(
+          "TuRU Padel läuft auf Port " +
+          PORT
+        );
+
+      }
+
+    );
+
   })
+
   .catch(error => {
-    console.error("Datenbankfehler:", error);
+
+    console.error(
+      "Datenbankfehler:",
+      error
+    );
+
     process.exit(1);
+
   });
