@@ -59,24 +59,84 @@ function page(title, body) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} – TuRU 1880 Padel</title>
-<style>
-body{font-family:Arial,sans-serif;margin:0;background:#f4f7fb;color:#10233f}
-header{background:#102f63;color:#fff;padding:20px;text-align:center}
-main{max-width:900px;margin:24px auto;padding:0 16px}
-.card{background:#fff;border-radius:14px;padding:20px;margin:14px 0;box-shadow:0 2px 12px #0001}
-input,button{box-sizing:border-box;width:100%;font-size:16px;padding:12px;margin:6px 0;border-radius:8px;border:1px solid #ccd3df}
-button{background:#102f63;color:#fff;border:0;font-weight:bold}
-.nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}
-.nav a{background:#e9f0fa;padding:10px 14px;border-radius:8px;text-decoration:none;color:#102f63;font-weight:bold}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
-.slot{padding:14px;background:#e9f0fa;border-radius:8px}
-.busy{background:#ffdede}
-.ok{background:#dff7e8;padding:12px;border-radius:8px}
-.warn{background:#fff3cd;padding:12px;border-radius:8px}
-.error{background:#ffdede;padding:12px;border-radius:8px}
-table{width:100%;border-collapse:collapse}
-td,th{padding:9px;border-bottom:1px solid #ddd;text-align:left}
-</style>
+body{
+  font-family:Arial,sans-serif;
+  margin:0;
+  background:#f3f6fb;
+  color:#172b4d;
+}
+
+header{
+  background:#163b73;
+  color:white;
+  padding:28px 20px;
+  text-align:center;
+}
+
+main{
+  max-width:1100px;
+  margin:30px auto;
+  padding:0 20px;
+}
+
+.card{
+  background:white;
+  padding:24px;
+  margin-bottom:24px;
+  border-radius:14px;
+  box-shadow:0 4px 14px rgba(0,0,0,.08);
+}
+
+h1,h2{
+  color:#163b73;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:15px;
+}
+
+th{
+  background:#163b73;
+  color:white;
+  padding:12px;
+  text-align:left;
+}
+
+td{
+  padding:12px;
+  border-bottom:1px solid #ddd;
+}
+
+button{
+  background:#163b73;
+  color:white;
+  border:0;
+  padding:9px 16px;
+  border-radius:7px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+button:hover{
+  background:#24549a;
+}
+
+@media(max-width:700px){
+  main{
+    padding:0 10px;
+  }
+
+  .card{
+    padding:15px;
+    overflow-x:auto;
+  }
+
+  table{
+    min-width:650px;
+  }
+}
 </head>
 <body>
 <header>
