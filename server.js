@@ -611,18 +611,7 @@ const rows = result.rows.map(booking => {
   const start = String(booking.start_time).slice(0, 5);
   const end = String(booking.end_time).slice(0, 5);
 
-  const [year, month, day] = date.split("-").map(Number);
-const [hour, minute] = start.split(":").map(Number);
-
-const bookingDate = new Date(
-  year,
-  month - 1,
-  day,
-  hour,
-  minute,
-  0
-);
-
+const bookingDate = new Date(`${date}T${start}:00`);
   const status = booking.used
     ? "genutzt"
     : bookingDate > now
