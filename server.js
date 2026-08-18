@@ -7,7 +7,7 @@ const bcrypt = require("bcryptjs");
 const app = express();
 
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.get("/turu-logo.png", (req, res) => res.sendFile(__dirname + "/turu-logo.png"));
 
 const PORT = process.env.PORT || 10000;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -149,18 +149,11 @@ a:hover{
   gap:14px;
 }
 
-.brand-mark{
+.brand-logo{
   width:48px;
   height:48px;
+  object-fit:contain;
   border-radius:12px;
-  background:var(--blue);
-  color:#fff;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-weight:900;
-  font-size:13px;
-  box-shadow:0 5px 16px rgba(23,75,155,.20);
 }
 
 .brand-title{
@@ -498,9 +491,7 @@ td{
 
   <div class="brand">
 
-    <div class="brand-mark">
-      TuRU
-    </div>
+    <img class="brand-logo" src="/turu-logo.png" alt="TuRU 1880 Düsseldorf">
 
     <div>
       <div class="brand-title">
