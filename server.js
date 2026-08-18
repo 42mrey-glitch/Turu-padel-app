@@ -609,9 +609,9 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_bookings_member ON bookings(member_id);
   `);
 
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_bookings_date ON bookings(booking_date);
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_bookings_date ON bookings(booking_date);
+`);
   await pool.query(`
   CREATE TABLE IF NOT EXISTS booking_blocks (
     id SERIAL PRIMARY KEY,
