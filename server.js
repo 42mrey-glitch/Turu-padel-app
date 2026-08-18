@@ -1015,12 +1015,12 @@ app.post("/login", async (req, res) => {
   try {
 
     const email =
-      String(req.body.email || "")
+     String(req.body?.email || "")
         .trim()
         .toLowerCase();
 
     const password =
-      String(req.body.password || "");
+     String(req.body?.password || "")
 
 
     const result = await pool.query(
