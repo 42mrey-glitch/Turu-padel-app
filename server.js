@@ -582,7 +582,7 @@ function slots() {
 
 async function initDb() {
 
-  await pool.query(`
+  `await pool.query(``
    `CREATE TABLE IF NOT EXISTS members(
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -591,9 +591,9 @@ async function initDb() {
       status TEXT NOT NULL DEFAULT 'pending',
       admin BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-  await pool.query(`
+    `);
+`);
+  `await pool.query(``
     CREATE TABLE IF NOT EXISTS bookings(
       id SERIAL PRIMARY KEY,
       member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -605,11 +605,11 @@ async function initDb() {
       UNIQUE(booking_date,start_time)
    `);
 
-   await pool.query(`
-CREATE INDEX IF NOT EXISTS idx_bookings_member
-   );
+   `await pool.query(``
+CREATE INDEX IF NOT EXISTS idx_bookings_member ON bookings(member_id);
+ ');
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_date
+ `await pool.query(``CREATE INDEX IF NOT EXISTS idx_bookings_date
  ON bookings(booking_date);
  `);
   await pool.query(`CREATE TABLE IF NOT EXISTS booking_blocks (
@@ -624,7 +624,7 @@ CREATE INDEX IF NOT EXISTS idx_bookings_member
       reason TEXT,
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
+   `);
 
   const email = (
     process.env.ADMIN_EMAIL || "rey@turu1880.de"
