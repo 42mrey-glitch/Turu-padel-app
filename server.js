@@ -582,18 +582,18 @@ function slots() {
 
 async function initDb() {
 
-  `await pool.query(``
-   `CREATE TABLE IF NOT EXISTS members(
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS members(
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       admin BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    `);
-`);
-  `await pool.query(``
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings(
       id SERIAL PRIMARY KEY,
       member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -601,30 +601,31 @@ async function initDb() {
       start_time TIME NOT NULL,
       end_time TIME NOT NULL,
       used BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE(booking_date,start_time)
-   `);
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE(booking_date, start_time)
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_bookings_member ON bookings(member_id);
+  `);
 
-   `await pool.query(``
-CREATE INDEX IF NOT EXISTS idx_bookings_member ON bookings(member_id);
- ');
 
- `await pool.query(``CREATE INDEX IF NOT EXISTS idx_bookings_date
- ON bookings(booking_date);
- `);
-  await pool.query(`CREATE TABLE IF NOT EXISTS booking_blocks (
-      id SERIAL PRIMARY KEY,
-      start_date DATE NOT NULL,
-      end_date DATE NOT NULL,
-      start_time TIME,
-      end_time TIME,
-      recurrence_type VARCHAR(20) NOT NULL DEFAULT 'once',
-      weekdays INTEGER[],
-      recurrence_end_date DATE,
-      reason TEXT,
-      active BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-   `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_bookings_date ON bookings(booking_date);
+  await pool.query(`
+  CREATE TABLE IF NOT EXISTS booking_blocks (
+    id SERIAL PRIMARY KEY,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    start_time TIME,
+    end_time TIME,
+    recurrence_type VARCHAR(20) NOT NULL DEFAULT 'once',
+    weekdays INTEGER[],
+    recurrence_end_date DATE,
+    reason TEXT,
+    active BOOLEAN NOT NULL DEFAULT TRUE
+  );
+`);
 
   const email = (
     process.env.ADMIN_EMAIL || "rey@turu1880.de"
