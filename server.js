@@ -7,6 +7,7 @@ const bcrypt = require("bcryptjs");
 const app = express();
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 app.get("/turu-logo.png", (req, res) => res.sendFile(__dirname + "/turu-logo.png"));
 
 const PORT = process.env.PORT || 10000;
@@ -1380,6 +1381,30 @@ app.post("/book", loginRequired, async (req, res) => {
   // Auch bei einem direkten POST dürfen
   // vergangene Zeiten nicht gebucht werden.
 
+  // Nur die vom System vorgesehenen 90-Minuten-Slots zulassen.
+  const validSlot = slots().some(
+    slot => slot.start === start && slot.end === end
+  );
+
+  if (!validSlot) {
+    return res.status(400).send(
+      page(
+        "Buchungsfehler",
+        `
+        <div class="card error">
+          <h2>Buchung nicht möglich</h2>
+          <p>Diese Spielzeit ist nicht gültig.</p>
+          <div class="actions">
+            <a class="btn" href="/booking">Zurück zur Buchung</a>
+          </div>
+        </div>
+        `,
+        req
+      )
+    );
+  }
+
+
   if (isPastSlot(date, start)) {
 
     return res.status(409).send(
@@ -1429,80 +1454,84 @@ app.post("/book", loginRequired, async (req, res) => {
     await client.query("BEGIN");
 
 
-    // Prüfen, ob das Mitglied bereits
-    // eine aktive Buchung besitzt.
+    // Normale Mitglieder dürfen nur eine aktive Buchung
+    // gleichzeitig haben. Administratoren dürfen unbegrenzt
+    // viele aktive Buchungen anlegen.
 
-    const active =
-      await client.query(
+    if (!req.session.member.admin) {
 
-        `SELECT id
-         FROM bookings
-         WHERE member_id=$1
-         AND used=FALSE
-         AND (booking_date + start_time) > NOW()
-         FOR UPDATE`,
+      const active =
+        await client.query(
 
-        [
-          req.session.member.id
-        ]
+          `SELECT id
+           FROM bookings
+           WHERE member_id=$1
+           AND used=FALSE
+           AND (booking_date + start_time) > NOW()
+           FOR UPDATE`,
 
-      );
+          [
+            req.session.member.id
+          ]
 
-
-    if (active.rowCount) {
-
-      await client.query(
-        "ROLLBACK"
-      );
+        );
 
 
-      return res.status(409).send(
+      if (active.rowCount) {
 
-        page(
+        await client.query(
+          "ROLLBACK"
+        );
 
-          "Buchung",
 
-          `
-          <div class="card warn">
+        return res.status(409).send(
 
-            <h2>Bereits eine aktive Buchung</h2>
+          page(
 
-            <p>
-              Du hast bereits eine aktive
-              Platzbuchung.
-            </p>
+            "Buchung",
 
-            <p class="muted">
-              Du kannst erst wieder buchen,
-              wenn diese Buchung abgelaufen ist.
-            </p>
+            `
+            <div class="card warn">
 
-            <div class="actions">
+              <h2>Bereits eine aktive Buchung</h2>
 
-              <a
-                class="btn secondary"
-                href="/my-bookings"
-              >
-                Meine Buchungen
-              </a>
+              <p>
+                Du hast bereits eine aktive
+                Platzbuchung.
+              </p>
 
-              <a
-                class="btn"
-                href="/booking"
-              >
-                Zurück zur Buchung
-              </a>
+              <p class="muted">
+                Du kannst erst wieder buchen,
+                wenn diese Buchung abgelaufen ist.
+              </p>
+
+              <div class="actions">
+
+                <a
+                  class="btn secondary"
+                  href="/my-bookings"
+                >
+                  Meine Buchungen
+                </a>
+
+                <a
+                  class="btn"
+                  href="/booking"
+                >
+                  Zurück zur Buchung
+                </a>
+
+              </div>
 
             </div>
+            `,
 
-          </div>
-          `,
+            req
 
-          req
+          )
 
-        )
-
-      );
+        );
+      }
     }
 
 
