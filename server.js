@@ -593,6 +593,7 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings(
       id SERIAL PRIMARY KEY,
       member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -602,14 +603,16 @@ async function initDb() {
       used BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(booking_date,start_time)
-    );
+   `);
 
-    CREATE INDEX IF NOT EXISTS idx_bookings_member
-    ON bookings(member_id);
+   await pool.query(`
+CREATE INDEX IF NOT EXISTS idx_bookings_member
+   );
 
-    CREATE INDEX IF NOT EXISTS idx_bookings_date
-    ON bookings(booking_date);
-     CREATE TABLE IF NOT EXISTS booking_blocks (
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_date
+ ON bookings(booking_date);
+ `);
+  await pool.query(`CREATE TABLE IF NOT EXISTS booking_blocks (
       id SERIAL PRIMARY KEY,
       start_date DATE NOT NULL,
       end_date DATE NOT NULL,
@@ -621,8 +624,7 @@ async function initDb() {
       reason TEXT,
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    ); 
-   `);
+    );
 
   const email = (
     process.env.ADMIN_EMAIL || "rey@turu1880.de"
