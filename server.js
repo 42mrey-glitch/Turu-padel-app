@@ -583,7 +583,7 @@ function slots() {
 async function initDb() {
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS members(
+   `CREATE TABLE IF NOT EXISTS members(
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
@@ -622,7 +622,7 @@ async function initDb() {
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     ); 
-    `;
+   `);
 
   const email = (
     process.env.ADMIN_EMAIL || "rey@turu1880.de"
