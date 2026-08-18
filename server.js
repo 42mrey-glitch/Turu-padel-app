@@ -609,7 +609,20 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_bookings_date
     ON bookings(booking_date);
-  `);
+     CREATE TABLE IF NOT EXISTS booking_blocks (
+      id SERIAL PRIMARY KEY,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      start_time TIME,
+      end_time TIME,
+      recurrence_type VARCHAR(20) NOT NULL DEFAULT 'once',
+      weekdays INTEGER[],
+      recurrence_end_date DATE,
+      reason TEXT,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    ); 
+    `;
 
   const email = (
     process.env.ADMIN_EMAIL || "rey@turu1880.de"
