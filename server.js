@@ -8,7 +8,7 @@ const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.get("/turu-logo.png", (req, res) => res.sendFile(__dirname + "/turu-logo.png"));
+app.get("/turu-logo-v2.png", (req, res) => res.sendFile(__dirname + "/turu-logo-v2.png"));
 
 const PORT = process.env.PORT || 10000;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -102,7 +102,7 @@ function page(title, body, req) {
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="TuRU Padel">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/turu-logo.png">
+<link rel="apple-touch-icon" href="/turu-logo-v2.png">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} – TuRU 1880 Padel</title>
@@ -785,7 +785,7 @@ td{
 
   <div class="brand">
 
-    <img class="brand-logo" src="/turu-logo.png" alt="TuRU 1880 Düsseldorf">
+    <img class="brand-logo" src="/turu-logo-v2.png" alt="TuRU 1880 Düsseldorf">
 
     <div>
       <div class="brand-title">
@@ -3611,13 +3611,13 @@ app.get("/manifest.webmanifest", (req, res) => {
     theme_color: "#0b4aa2",
     icons: [
       {
-        src: "/turu-logo.png",
+        src: "/turu-logo-v2.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "any maskable"
       },
       {
-        src: "/turu-logo.png",
+        src: "/turu-logo-v2.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "any maskable"
@@ -3628,8 +3628,8 @@ app.get("/manifest.webmanifest", (req, res) => {
 
 app.get("/sw.js", (req, res) => {
   res.type("application/javascript").send(`
-const CACHE_NAME = "turu-padel-shell-v1";
-const SHELL = ["/turu-logo.png"];
+const CACHE_NAME = "turu-padel-shell-v2";
+const SHELL = ["/turu-logo-v2.png"];
 
 self.addEventListener("install", event => {
   event.waitUntil(
@@ -3658,7 +3658,7 @@ self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
-  if (url.pathname === "/turu-logo.png") {
+  if (url.pathname === "/turu-logo-v2.png") {
     event.respondWith(
       caches.match(event.request).then(cached =>
         cached || fetch(event.request)
