@@ -456,6 +456,289 @@ td{
   color:#b33226;
 }
 
+
+/* Kalenderansichten – im bestehenden TuRU-Design */
+.calendar-toolbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-bottom:18px;
+}
+.calendar-tabs{
+  display:flex;
+  gap:7px;
+  flex-wrap:wrap;
+}
+.calendar-tabs a{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:9px 13px;
+  border:1px solid var(--line);
+  border-radius:9px;
+  background:#fff;
+  color:#334155;
+  font-size:14px;
+  font-weight:800;
+}
+.calendar-tabs a.active{
+  background:var(--blue);
+  color:#fff;
+  border-color:var(--blue);
+}
+.calendar-nav{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.calendar-nav a{
+  display:inline-flex;
+  min-width:38px;
+  min-height:38px;
+  align-items:center;
+  justify-content:center;
+  border:1px solid var(--line);
+  border-radius:9px;
+  background:#fff;
+  color:var(--blue);
+  font-weight:900;
+}
+.calendar-nav .today{
+  padding:9px 12px;
+  min-width:auto;
+}
+.calendar-title{
+  font-size:20px;
+  font-weight:900;
+  color:#18345f;
+}
+.calendar-legend{
+  display:flex;
+  gap:14px;
+  flex-wrap:wrap;
+  margin-top:15px;
+  color:var(--muted);
+  font-size:13px;
+  font-weight:800;
+}
+.calendar-legend span{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.legend-dot{
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  display:inline-block;
+}
+.legend-free{background:var(--green)}
+.legend-busy{background:var(--red)}
+.legend-blocked{background:var(--orange)}
+
+.week-calendar{
+  display:grid;
+  grid-template-columns:78px repeat(7,minmax(110px,1fr));
+  border:1px solid var(--line);
+  border-radius:12px;
+  overflow:hidden;
+  background:#fff;
+  min-width:850px;
+}
+.week-calendar .wc-head,
+.week-calendar .wc-time,
+.week-calendar .wc-cell{
+  min-height:70px;
+  border-right:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+  padding:8px;
+}
+.week-calendar .wc-head{
+  background:#f1f5fb;
+  color:#18345f;
+  text-align:center;
+  font-weight:900;
+}
+.week-calendar .wc-head small{
+  display:block;
+  margin-top:3px;
+  color:var(--muted);
+  font-weight:700;
+}
+.week-calendar .wc-time{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:900;
+  color:#18345f;
+  background:#fafbfd;
+}
+.wc-cell{
+  background:#fff;
+}
+.wc-slot{
+  width:100%;
+  min-height:52px;
+  border-radius:9px;
+  padding:7px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  text-align:center;
+  font-size:11px;
+  font-weight:900;
+  line-height:1.25;
+}
+.wc-slot.free{
+  background:#eaf8f1;
+  color:#147a4b;
+}
+.wc-slot.busy{
+  background:#fff0ee;
+  color:#b33226;
+}
+.wc-slot.blocked{
+  background:#fff4dc;
+  color:#996000;
+}
+.wc-slot.past,
+.wc-slot.limit{
+  background:#f2f4f7;
+  color:#8a919d;
+}
+.wc-name{
+  margin-top:2px;
+  font-weight:700;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.month-wrap{
+  overflow-x:auto;
+}
+.month-calendar{
+  display:grid;
+  grid-template-columns:repeat(7,minmax(120px,1fr));
+  min-width:840px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  overflow:hidden;
+  background:#fff;
+}
+.month-head{
+  background:#f1f5fb;
+  color:#18345f;
+  padding:10px 8px;
+  text-align:center;
+  font-size:13px;
+  font-weight:900;
+  border-right:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+}
+.month-day{
+  min-height:112px;
+  padding:9px;
+  border-right:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+  background:#fff;
+}
+.month-day.outside{
+  background:#fafbfd;
+  color:#a0a7b2;
+}
+.month-day-link{
+  display:block;
+  height:100%;
+  color:inherit;
+}
+.month-number{
+  font-weight:900;
+  color:#18345f;
+}
+.month-day.outside .month-number{
+  color:#a0a7b2;
+}
+.month-summary{
+  margin-top:12px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:5px;
+}
+.month-pill{
+  padding:4px 7px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:900;
+}
+.month-pill.free{background:#eaf8f1;color:#147a4b}
+.month-pill.busy{background:#fff0ee;color:#b33226}
+.month-pill.blocked{background:#fff4dc;color:#996000}
+.month-pill.limit{background:#f2f4f7;color:#8a919d}
+
+.day-calendar{
+  display:grid;
+  gap:10px;
+}
+.calendar-slot{
+  display:grid;
+  grid-template-columns:150px 1fr auto;
+  gap:14px;
+  align-items:center;
+  background:#fff;
+  border:1px solid #dbe4f2;
+  border-radius:13px;
+  padding:14px 16px;
+}
+.calendar-slot .slot-time{
+  margin:0;
+}
+.calendar-slot .slot-info{
+  min-width:0;
+}
+.calendar-slot .slot-info strong{
+  display:block;
+  color:#18345f;
+}
+.calendar-slot .slot-info small{
+  display:block;
+  margin-top:3px;
+  color:var(--muted);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.calendar-slot.free{
+  border-left:4px solid var(--green);
+}
+.calendar-slot.busy{
+  border-left:4px solid var(--red);
+  background:#fbfbfc;
+}
+.calendar-slot.blocked{
+  border-left:4px solid var(--orange);
+  background:#fffdf8;
+}
+.calendar-slot.past,
+.calendar-slot.limit{
+  border-left:4px solid #b9bec7;
+  background:#f7f8fa;
+}
+.calendar-status{
+  font-size:13px;
+  font-weight:900;
+}
+.calendar-status.free{color:var(--green)}
+.calendar-status.busy{color:var(--red)}
+.calendar-status.blocked{color:var(--orange)}
+.calendar-status.past,
+.calendar-status.limit{color:#7b8492}
+.calendar-scroll{
+  overflow-x:auto;
+}
+
 @media(max-width:700px){
 
   .brand{
@@ -503,7 +786,7 @@ td{
       </div>
 
       <div class="brand-sub">
-        Blau. Weiß. Düsseldorf.
+        Padelplatz buchen
       </div>
     </div>
 
@@ -596,15 +879,8 @@ function slots() {
 }
 
 function dateFromYmd(value) {
-  const raw = String(value || "").slice(0, 10);
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-
-  if (!match) {
-    return new Date(NaN);
-  }
-
-  const [, y, m, d] = match.map(Number);
-  return new Date(Date.UTC(y, m - 1, d));
+  const [y, m, d] = String(value).split("-").map(Number);
+  return new Date(Date.UTC(y, (m || 1) - 1, d || 1));
 }
 
 function ymd(date) {
@@ -663,16 +939,12 @@ function blockAppliesToDate(block, date) {
 }
 
 async function getActiveBlocksForDate(date) {
-  // Wir laden alle aktiven Sperren und entscheiden ausschließlich
-  // anhand der vorhandenen Daten, ob eine Sperre für den gewählten
-  // Kalendertag gilt. Dadurch funktionieren auch einmalige und
-  // wiederkehrende Sperren zuverlässig.
-  const result = await pool.query(`
-    SELECT *
-    FROM booking_blocks
-    WHERE active = TRUE
-    ORDER BY start_date, start_time, id
-  `);
+  const result = await pool.query(
+    `SELECT *
+       FROM booking_blocks
+      WHERE active=TRUE
+      ORDER BY start_date, start_time, id`
+  );
 
   return result.rows.filter(block => blockAppliesToDate(block, date));
 }
@@ -1386,10 +1658,328 @@ app.post("/password", loginRequired, async (req, res) => {
 });
 
 
+
+function datePlusDays(value, days) {
+  const date = dateFromYmd(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  return ymd(date);
+}
+
+function startOfIsoWeek(value) {
+  const date = dateFromYmd(value);
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() - day + 1);
+  return ymd(date);
+}
+
+function monthStart(value) {
+  const date = dateFromYmd(value);
+  return ymd(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)));
+}
+
+function monthEnd(value) {
+  const date = dateFromYmd(value);
+  return ymd(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)));
+}
+
+function monthTitle(value) {
+  return dateFromYmd(value).toLocaleDateString("de-DE", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
+function germanDayShort(value) {
+  return dateFromYmd(value).toLocaleDateString("de-DE", {
+    weekday: "short",
+    timeZone: "UTC"
+  }).replace(".", "");
+}
+
+function germanDayLong(value) {
+  return dateFromYmd(value).toLocaleDateString("de-DE", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
+function bookingLimitDate(req) {
+  const today = berlinDate();
+  if (req.session.member?.admin) return null;
+  return datePlusDays(today, 7);
+}
+
+function canMemberBookDate(req, date) {
+  if (req.session.member?.admin) return true;
+  const today = berlinDate();
+  const limit = datePlusDays(today, 7);
+  return date >= today && date <= limit;
+}
+
+async function getBookingsForDate(date) {
+  const result = await pool.query(`
+    SELECT
+      b.id,
+      b.booking_date,
+      b.start_time,
+      b.end_time,
+      b.member_id,
+      m.name AS member_name
+    FROM bookings b
+    JOIN members m ON m.id = b.member_id
+    WHERE b.booking_date=$1
+    ORDER BY b.start_time
+  `, [date]);
+
+  return result.rows;
+}
+
+async function getDayState(date) {
+  const [bookings, blocks] = await Promise.all([
+    getBookingsForDate(date),
+    getActiveBlocksForDate(date)
+  ]);
+
+  return { bookings, blocks };
+}
+
+function getSlotState(slot, dayState) {
+  const block = dayState.blocks.find(item =>
+    blockTimeOverlaps(item, slot.start, slot.end)
+  );
+
+  if (block) {
+    return {
+      type: "blocked",
+      label: "🔒 Gesperrt",
+      detail: block.reason || "Reserviert"
+    };
+  }
+
+  const booking = dayState.bookings.find(item =>
+    String(item.start_time).slice(0, 5) === slot.start
+  );
+
+  if (booking) {
+    return {
+      type: "busy",
+      label: "🔴 Belegt",
+      detail: booking.member_name || "Reserviert"
+    };
+  }
+
+  return {
+    type: "free",
+    label: "🟢 Frei",
+    detail: ""
+  };
+}
+
+function calendarNavigation(view, date, req) {
+  let previous;
+  let next;
+
+  if (view === "day") {
+    previous = datePlusDays(date, -1);
+    next = datePlusDays(date, 1);
+  } else if (view === "week") {
+    previous = datePlusDays(startOfIsoWeek(date), -7);
+    next = datePlusDays(startOfIsoWeek(date), 7);
+  } else {
+    const d = dateFromYmd(date);
+    previous = ymd(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1)));
+    next = ymd(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)));
+  }
+
+  return `
+    <div class="calendar-nav">
+      <a href="/booking?view=${view}&date=${previous}" aria-label="Zurück">‹</a>
+      <a class="today" href="/booking?view=${view}&date=${berlinDate()}">Heute</a>
+      <a href="/booking?view=${view}&date=${next}" aria-label="Weiter">›</a>
+    </div>
+  `;
+}
+
+async function renderDayCalendar(date, req) {
+  const state = await getDayState(date);
+  const limit = bookingLimitDate(req);
+  const outsideLimit = limit && date > limit;
+
+  const html = slots().map(slot => {
+    const past = isPastSlot(date, slot.start);
+    const stateForSlot = getSlotState(slot, state);
+
+    if (past) {
+      return `
+        <div class="calendar-slot past">
+          <div class="slot-time">${slot.start}–${slot.end}</div>
+          <div class="slot-info"><strong>Vergangen</strong><small>Dieser Termin ist nicht mehr buchbar.</small></div>
+          <div class="calendar-status past">Nicht buchbar</div>
+        </div>
+      `;
+    }
+
+    if (outsideLimit) {
+      return `
+        <div class="calendar-slot limit">
+          <div class="slot-time">${slot.start}–${slot.end}</div>
+          <div class="slot-info"><strong>Buchungsfrist</strong><small>Für Mitglieder maximal 7 Tage im Voraus.</small></div>
+          <div class="calendar-status limit">Noch nicht buchbar</div>
+        </div>
+      `;
+    }
+
+    if (stateForSlot.type === "blocked") {
+      return `
+        <div class="calendar-slot blocked">
+          <div class="slot-time">${slot.start}–${slot.end}</div>
+          <div class="slot-info"><strong>${esc(stateForSlot.label)}</strong><small>${esc(stateForSlot.detail)}</small></div>
+          <div class="calendar-status blocked">Gesperrt</div>
+        </div>
+      `;
+    }
+
+    if (stateForSlot.type === "busy") {
+      return `
+        <div class="calendar-slot busy">
+          <div class="slot-time">${slot.start}–${slot.end}</div>
+          <div class="slot-info"><strong>🔴 Belegt</strong><small>${esc(stateForSlot.detail)}</small></div>
+          <div class="calendar-status busy">Belegt</div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="calendar-slot free">
+        <div class="slot-time">${slot.start}–${slot.end}</div>
+        <div class="slot-info"><strong>🟢 Frei</strong><small>Ein Padelplatz verfügbar</small></div>
+        <form method="post" action="/book">
+          <input type="hidden" name="date" value="${esc(date)}">
+          <input type="hidden" name="start" value="${esc(slot.start)}">
+          <input type="hidden" name="end" value="${esc(slot.end)}">
+          <button class="btn" type="submit">Jetzt buchen</button>
+        </form>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="calendar-title">${esc(germanDayLong(date))}</div>
+    <div class="day-calendar">${html}</div>
+  `;
+}
+
+async function renderWeekCalendar(date, req) {
+  const start = startOfIsoWeek(date);
+  const days = Array.from({ length: 7 }, (_, index) => datePlusDays(start, index));
+  const states = await Promise.all(days.map(getDayState));
+  const limit = bookingLimitDate(req);
+
+  let html = `<div class="calendar-scroll"><div class="week-calendar">
+    <div class="wc-head">Zeit</div>
+    ${days.map(day => `
+      <div class="wc-head">
+        ${esc(germanDayShort(day))}
+        <small>${day.slice(8,10)}.${day.slice(5,7)}.</small>
+      </div>
+    `).join("")}`;
+
+  for (const slot of slots()) {
+    html += `<div class="wc-time">${slot.start}</div>`;
+
+    days.forEach((day, index) => {
+      const state = getSlotState(slot, states[index]);
+      const past = isPastSlot(day, slot.start);
+      const limited = limit && day > limit;
+
+      if (past) {
+        html += `<div class="wc-cell"><div class="wc-slot past">Vergangen</div></div>`;
+      } else if (limited) {
+        html += `<div class="wc-cell"><div class="wc-slot limit">7-Tage-Frist</div></div>`;
+      } else if (state.type === "blocked") {
+        html += `<div class="wc-cell"><div class="wc-slot blocked">🔒 Gesperrt<div class="wc-name">${esc(state.detail)}</div></div></div>`;
+      } else if (state.type === "busy") {
+        html += `<div class="wc-cell"><div class="wc-slot busy">🔴 Belegt<div class="wc-name">${esc(state.detail)}</div></div></div>`;
+      } else {
+        html += `<div class="wc-cell">
+          <a class="wc-slot free" href="/booking?view=day&date=${day}">
+            🟢 Frei
+          </a>
+        </div>`;
+      }
+    });
+  }
+
+  html += `</div></div>`;
+  return html;
+}
+
+async function renderMonthCalendar(date, req) {
+  const base = dateFromYmd(date);
+  const first = monthStart(date);
+  const firstDate = dateFromYmd(first);
+  const firstWeekday = firstDate.getUTCDay() || 7;
+  const gridStart = datePlusDays(first, -(firstWeekday - 1));
+  const last = monthEnd(date);
+  const lastDate = dateFromYmd(last);
+  const lastWeekday = lastDate.getUTCDay() || 7;
+  const gridEnd = datePlusDays(last, 7 - lastWeekday);
+  const totalDays = Math.round((dateFromYmd(gridEnd) - dateFromYmd(gridStart)) / 86400000) + 1;
+  const days = Array.from({ length: totalDays }, (_, i) => datePlusDays(gridStart, i));
+  const states = await Promise.all(days.map(getDayState));
+  const limit = bookingLimitDate(req);
+
+  let html = `<div class="month-wrap"><div class="month-calendar">
+    ${["Mo","Di","Mi","Do","Fr","Sa","So"].map(day => `<div class="month-head">${day}</div>`).join("")}`;
+
+  days.forEach((day, index) => {
+    const inMonth = day.slice(0, 7) === date.slice(0, 7);
+    const limited = limit && day > limit;
+    const pastDay = day < berlinDate();
+    const state = states[index];
+
+    let free = 0;
+    let busy = 0;
+    let blocked = 0;
+
+    slots().forEach(slot => {
+      const slotState = getSlotState(slot, state);
+      if (slotState.type === "blocked") blocked++;
+      else if (slotState.type === "busy") busy++;
+      else if (!pastDay && !(limited && !req.session.member.admin)) free++;
+    });
+
+    html += `
+      <div class="month-day ${inMonth ? "" : "outside"}">
+        <a class="month-day-link" href="/booking?view=day&date=${day}">
+          <div class="month-number">${day.slice(8,10)}</div>
+          <div class="month-summary">
+            ${pastDay ? `<span class="month-pill limit">Vergangen</span>` : ""}
+            ${limited ? `<span class="month-pill limit">7-Tage-Frist</span>` : ""}
+            ${free && !limited ? `<span class="month-pill free">${free} frei</span>` : ""}
+            ${busy ? `<span class="month-pill busy">${busy} belegt</span>` : ""}
+            ${blocked ? `<span class="month-pill blocked">${blocked} gesperrt</span>` : ""}
+          </div>
+        </a>
+      </div>
+    `;
+  });
+
+  html += `</div></div>`;
+  return html;
+}
+
 app.get("/booking", loginRequired, async (req, res) => {
   try {
+    const view = ["day", "week", "month"].includes(String(req.query.view || ""))
+      ? String(req.query.view)
+      : "day";
 
-    let date = String(req.query.date || "");
+    let date = String(req.query.date || berlinDate());
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       date = berlinDate();
@@ -1397,196 +1987,85 @@ app.get("/booking", loginRequired, async (req, res) => {
 
     const today = berlinDate();
 
-    // Vergangene Tage automatisch auf heute setzen
-    if (date < today) {
-      date = today;
+    // Vergangenheit nicht als Startdatum anzeigen.
+    if (date < today) date = today;
+
+    let calendarBody = "";
+
+    if (view === "day") {
+      calendarBody = await renderDayCalendar(date, req);
+    } else if (view === "week") {
+      calendarBody = await renderWeekCalendar(date, req);
+    } else {
+      calendarBody = await renderMonthCalendar(date, req);
     }
 
-    const result = await pool.query(
-      "SELECT start_time FROM bookings WHERE booking_date=$1",
-      [date]
-    );
-
-    const busy = new Set(
-      result.rows.map(row =>
-        String(row.start_time).slice(0, 5)
-      )
-    );
-
-    const blocks = await getActiveBlocksForDate(date);
-
-    const html = slots().map(slot => {
-
-      // Vergangene Uhrzeiten sperren
-      if (isPastSlot(date, slot.start)) {
-
-        return `
-          <div class="slot past">
-
-            <div class="slot-time">
-              ${slot.start}-${slot.end}
-            </div>
-
-            <div class="slot-status">
-              Nicht mehr buchbar
-            </div>
-
-          </div>
-        `;
-      }
-
-
-      // Vom Administrator gesperrte Zeiten
-      if (blocks.some(block => blockTimeOverlaps(block, slot.start, slot.end))) {
-        return `
-          <div class="slot busy">
-            <div class="slot-time">
-              ${slot.start}-${slot.end}
-            </div>
-            <div class="slot-status">
-              🔒 Gesperrt
-            </div>
-          </div>
-        `;
-      }
-
-      // Bereits belegte Zeiten
-      if (busy.has(slot.start)) {
-
-        return `
-          <div class="slot busy">
-
-            <div class="slot-time">
-              ${slot.start}-${slot.end}
-            </div>
-
-            <div class="slot-status">
-              Bereits belegt
-            </div>
-
-          </div>
-        `;
-      }
-
-
-      // Freie Zeit
-      return `
-        <div class="slot">
-
-          <div class="slot-time">
-            ${slot.start}-${slot.end}
-          </div>
-
-          <form method="post" action="/book">
-
-            <input
-              type="hidden"
-              name="date"
-              value="${esc(date)}"
-            >
-
-            <input
-              type="hidden"
-              name="start"
-              value="${esc(slot.start)}"
-            >
-
-            <input
-              type="hidden"
-              name="end"
-              value="${esc(slot.end)}"
-            >
-
-            <button
-              class="btn"
-              type="submit"
-            >
-              Jetzt buchen
-            </button>
-
-          </form>
-
+    const limit = bookingLimitDate(req);
+    const limitNotice = req.session.member.admin
+      ? `
+        <div class="notice">
+          👑 Administrator: Buchungen können beliebig weit im Voraus vorgenommen werden.
+        </div>
+      `
+      : `
+        <div class="notice">
+          Mitglieder können maximal <b>7 Tage im Voraus</b> buchen.
+          Die Kalenderansichten zeigen weitere Tage, dort kann aber noch nicht gebucht werden.
         </div>
       `;
-    }).join("");
-
 
     res.send(
-
       page(
-
         "Platz buchen",
-
         `
-
         <div class="hero">
-
           <h1>🎾 Platz buchen</h1>
-
           <p>
-            Wähle einen Tag und anschließend
-            eine freie Spielzeit.
+            Wähle Tag, Woche oder Monat und sehe sofort,
+            wann der Platz frei, belegt oder gesperrt ist.
           </p>
-
         </div>
-
 
         <div class="card">
+          <div class="calendar-toolbar">
+            <div class="calendar-tabs">
+              <a class="${view === "day" ? "active" : ""}" href="/booking?view=day&date=${date}">Tag</a>
+              <a class="${view === "week" ? "active" : ""}" href="/booking?view=week&date=${date}">Woche</a>
+              <a class="${view === "month" ? "active" : ""}" href="/booking?view=month&date=${date}">Monat</a>
+            </div>
 
-          <h2>Datum auswählen</h2>
-
-          <label for="bookingDate">
-            Spieltag
-          </label>
-
-          <input
-            type="date"
-            id="bookingDate"
-            value="${esc(date)}"
-            min="${esc(today)}"
-            onchange="
-              window.location.href=
-              '/booking?date='+this.value
-            "
-          >
-
-          <div class="notice">
-
-            Vergangene Tage und bereits
-            vergangene Uhrzeiten sind nicht buchbar.
-
+            ${calendarNavigation(view, date, req)}
           </div>
 
-        </div>
-
-
-        <div class="card">
-
-          <h2>Verfügbare Zeiten</h2>
-
-          <div class="grid">
-
-            ${html}
-
+          <div style="margin-bottom:18px">
+            <label for="bookingDate">Spieltag</label>
+            <input
+              type="date"
+              id="bookingDate"
+              value="${esc(date)}"
+              min="${esc(today)}"
+              ${!req.session.member.admin ? `max="${esc(limit)}"` : ""}
+              onchange="window.location.href='/booking?view=${view}&date='+this.value"
+            >
           </div>
 
-        </div>
+          ${calendarBody}
 
+          <div class="calendar-legend">
+            <span><i class="legend-dot legend-free"></i> Frei</span>
+            <span><i class="legend-dot legend-busy"></i> Belegt + Name</span>
+            <span><i class="legend-dot legend-blocked"></i> Gesperrt</span>
+          </div>
+
+          ${limitNotice}
+        </div>
         `,
-
         req
-
       )
-
     );
-
   } catch (error) {
-
     console.error(error);
-
-    res.status(500).send(
-      "Serverfehler"
-    );
+    res.status(500).send("Serverfehler");
   }
 });
 
@@ -1688,6 +2167,42 @@ app.post("/book", loginRequired, async (req, res) => {
   }
 
 
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).send(
+      page(
+        "Buchungsfehler",
+        `
+        <div class="card error">
+          <h2>Ungültiges Datum</h2>
+          <p>Bitte wähle einen gültigen Spieltag.</p>
+          <div class="actions">
+            <a class="btn" href="/booking">Zurück zur Buchung</a>
+          </div>
+        </div>
+        `,
+        req
+      )
+    );
+  }
+
+  if (!req.session.member.admin && !canMemberBookDate(req, date)) {
+    return res.status(409).send(
+      page(
+        "Buchungsfrist",
+        `
+        <div class="card warn">
+          <h2>Buchung noch nicht möglich</h2>
+          <p>Mitglieder können maximal 7 Tage im Voraus buchen.</p>
+          <div class="actions">
+            <a class="btn" href="/booking?view=day&date=${esc(berlinDate())}">Zum Kalender</a>
+          </div>
+        </div>
+        `,
+        req
+      )
+    );
+  }
+
   if (isPastSlot(date, start)) {
 
     return res.status(409).send(
@@ -1727,27 +2242,6 @@ app.post("/book", loginRequired, async (req, res) => {
     );
   }
 
-
-  // Zweite Prüfung unmittelbar vor der Datenbankbuchung.
-  // Damit kann eine gesperrte Zeit auch dann nicht gebucht werden,
-  // wenn jemand den POST-Aufruf manuell aufruft.
-  if (await isSlotBlocked(date, start, end)) {
-    return res.status(409).send(
-      page(
-        "Buchung nicht möglich",
-        `
-        <div class="card warn">
-          <h2>Termin gesperrt</h2>
-          <p>Dieser Zeitraum wurde vom Administrator reserviert oder gesperrt.</p>
-          <div class="actions">
-            <a class="btn" href="/booking?date=${encodeURIComponent(date)}">Andere Zeit auswählen</a>
-          </div>
-        </div>
-        `,
-        req
-      )
-    );
-  }
 
   const client =
     await pool.connect();
