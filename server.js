@@ -502,6 +502,9 @@ td{
         TuRU 1880 Padel
       </div>
 
+      <div class="brand-sub">
+        Blau. Weiß. Düsseldorf.
+      </div>
     </div>
 
   </div>
@@ -593,8 +596,15 @@ function slots() {
 }
 
 function dateFromYmd(value) {
-  const [y, m, d] = String(value).split("-").map(Number);
-  return new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+  const raw = String(value || "").slice(0, 10);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return new Date(NaN);
+  }
+
+  const [, y, m, d] = match.map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
 }
 
 function ymd(date) {
@@ -653,19 +663,16 @@ function blockAppliesToDate(block, date) {
 }
 
 async function getActiveBlocksForDate(date) {
-  const result = await pool.query(
-    `SELECT *
-       FROM booking_blocks
-      WHERE active=TRUE
-        AND start_date <= $1
-        AND (
-          recurrence_type='once'
-          OR recurrence_end_date IS NULL
-          OR recurrence_end_date >= $1
-        )
-      ORDER BY start_date, start_time`,
-    [date]
-  );
+  // Wir laden alle aktiven Sperren und entscheiden ausschließlich
+  // anhand der vorhandenen Daten, ob eine Sperre für den gewählten
+  // Kalendertag gilt. Dadurch funktionieren auch einmalige und
+  // wiederkehrende Sperren zuverlässig.
+  const result = await pool.query(`
+    SELECT *
+    FROM booking_blocks
+    WHERE active = TRUE
+    ORDER BY start_date, start_time, id
+  `);
 
   return result.rows.filter(block => blockAppliesToDate(block, date));
 }
@@ -830,22 +837,23 @@ app.get("/", (req, res) => {
         <h1>TuRU 1880 Padel</h1>
 
         <p>
-          Willkommen bei TuRU 1880 Padel.
+          Die Buchungsseite für die Padelplätze
+          von TuRU 1880 Düsseldorf.
         </p>
 
-        <p class="muted">
-          Melde dich an, um einen freien Padelplatz zu buchen.
-          Noch kein Konto? Registriere dich einfach.
+        <p>
+          Padelplätze können ausschließlich von
+          freigeschalteten Mitgliedern gebucht werden.
         </p>
 
         <div class="actions">
 
           <a class="btn" href="/login">
-            🔐 Einloggen
+            Mitglieder-Login
           </a>
 
           <a class="btn secondary" href="/register">
-            👤 Registrieren
+            Mitglied registrieren
           </a>
 
         </div>
@@ -854,25 +862,12 @@ app.get("/", (req, res) => {
 
       <div class="card">
 
-        <h2>Noch kein Konto?</h2>
+        <h2>So funktioniert es</h2>
 
         <p class="muted">
-          Registriere dich mit deinem Namen, deiner E-Mail-Adresse
-          und einem Passwort. Nach der Freischaltung durch den
-          Administrator kannst du den Platz buchen.
+          Registrieren, vom Administrator freischalten lassen
+          und anschließend einen freien Termin auswählen.
         </p>
-
-        <div class="actions">
-
-          <a class="btn" href="/register">
-            Mitglied registrieren
-          </a>
-
-          <a class="btn secondary" href="/login">
-            Zum Login
-          </a>
-
-        </div>
 
       </div>
     `;
@@ -1732,6 +1727,27 @@ app.post("/book", loginRequired, async (req, res) => {
     );
   }
 
+
+  // Zweite Prüfung unmittelbar vor der Datenbankbuchung.
+  // Damit kann eine gesperrte Zeit auch dann nicht gebucht werden,
+  // wenn jemand den POST-Aufruf manuell aufruft.
+  if (await isSlotBlocked(date, start, end)) {
+    return res.status(409).send(
+      page(
+        "Buchung nicht möglich",
+        `
+        <div class="card warn">
+          <h2>Termin gesperrt</h2>
+          <p>Dieser Zeitraum wurde vom Administrator reserviert oder gesperrt.</p>
+          <div class="actions">
+            <a class="btn" href="/booking?date=${encodeURIComponent(date)}">Andere Zeit auswählen</a>
+          </div>
+        </div>
+        `,
+        req
+      )
+    );
+  }
 
   const client =
     await pool.connect();
