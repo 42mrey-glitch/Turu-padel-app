@@ -502,9 +502,6 @@ td{
         TuRU 1880 Padel
       </div>
 
-      <div class="brand-sub">
-        Padelplatz buchen
-      </div>
     </div>
 
   </div>
@@ -833,22 +830,22 @@ app.get("/", (req, res) => {
         <h1>TuRU 1880 Padel</h1>
 
         <p>
-          Willkommen auf der Buchungsseite.
+          Willkommen bei TuRU 1880 Padel.
         </p>
 
         <p class="muted">
-          Melde dich an, um einen freien Padel-Termin zu buchen.
+          Melde dich an, um einen freien Padelplatz zu buchen.
           Noch kein Konto? Registriere dich einfach.
         </p>
 
         <div class="actions">
 
           <a class="btn" href="/login">
-            🔐 Mitglieder-Login
+            🔐 Einloggen
           </a>
 
           <a class="btn secondary" href="/register">
-            👤 Jetzt registrieren
+            👤 Registrieren
           </a>
 
         </div>
@@ -857,13 +854,12 @@ app.get("/", (req, res) => {
 
       <div class="card">
 
-        <h2>Noch nicht registriert?</h2>
+        <h2>Noch kein Konto?</h2>
 
         <p class="muted">
-          Erstelle dein Mitgliedskonto. Nach der Registrierung
-          wird dein Konto vom Administrator freigeschaltet.
-          Danach kannst du freie Termine buchen und deine
-          Buchungen verwalten.
+          Registriere dich mit deinem Namen, deiner E-Mail-Adresse
+          und einem Passwort. Nach der Freischaltung durch den
+          Administrator kannst du den Platz buchen.
         </p>
 
         <div class="actions">
