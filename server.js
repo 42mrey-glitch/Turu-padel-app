@@ -300,7 +300,7 @@ app.get("/login",(req,res)=>res.send(page("Anmelden",req,`
       <button class="btn" style="margin-top:16px;width:100%">Anmelden</button>
     </form>
   </div>
-`));
+`)));
 
 app.post("/login",async(req,res)=>{
   try{
