@@ -96,6 +96,13 @@ function page(title, body, req) {
   return `<!doctype html>
 <html lang="de">
 <head>
+<meta name="theme-color" content="#0b4aa2">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="TuRU Padel">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/turu-logo.png">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} – TuRU 1880 Padel</title>
@@ -800,6 +807,13 @@ td{
 ${body}
 </main>
 
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
+</script>
 </body>
 </html>`;
 }
@@ -3577,6 +3591,91 @@ app.post(
   }
 );
 
+
+
+// ============================================================
+// TuRU Padel – Progressive Web App (PWA)
+// Das bestehende Design und die Buchungslogik bleiben unverändert.
+// ============================================================
+
+app.get("/manifest.webmanifest", (req, res) => {
+  res.type("application/manifest+json").send(JSON.stringify({
+    name: "TuRU 1880 Padel",
+    short_name: "TuRU Padel",
+    description: "TuRU 1880 Padel – Platzbuchung",
+    start_url: "/",
+    scope: "/",
+    display: "standalone",
+    orientation: "portrait-primary",
+    background_color: "#f5f8fc",
+    theme_color: "#0b4aa2",
+    icons: [
+      {
+        src: "/turu-logo.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "any maskable"
+      },
+      {
+        src: "/turu-logo.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "any maskable"
+      }
+    ]
+  }));
+});
+
+app.get("/sw.js", (req, res) => {
+  res.type("application/javascript").send(`
+const CACHE_NAME = "turu-padel-shell-v1";
+const SHELL = ["/turu-logo.png"];
+
+self.addEventListener("install", event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(SHELL))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(
+        keys
+          .filter(key => key !== CACHE_NAME)
+          .map(key => caches.delete(key))
+      )
+    ).then(() => self.clients.claim())
+  );
+});
+
+// Private pages, bookings and API responses are deliberately not cached.
+self.addEventListener("fetch", event => {
+  if (event.request.method !== "GET") return;
+
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+
+  if (url.pathname === "/turu-logo.png") {
+    event.respondWith(
+      caches.match(event.request).then(cached =>
+        cached || fetch(event.request)
+      )
+    );
+  }
+});
+`);
+});
+
+app.get("/pwa-check", (req, res) => {
+  res.json({
+    ok: true,
+    app: "TuRU 1880 Padel",
+    pwa: true
+  });
+});
 
 initDb()
 
