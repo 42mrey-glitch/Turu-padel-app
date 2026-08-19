@@ -878,9 +878,24 @@ function slots() {
   return result;
 }
 
+function normalizeYmd(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? match[0] : "";
+}
+
 function dateFromYmd(value) {
-  const [y, m, d] = String(value).split("-").map(Number);
-  return new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+  const normalized = normalizeYmd(value);
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) return new Date(NaN);
+
+  const [, y, m, d] = match.map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
 }
 
 function ymd(date) {
@@ -891,47 +906,110 @@ function weekdayFromYmd(value) {
   return dateFromYmd(value).getUTCDay();
 }
 
+function normalizeTime(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${String(value.getUTCHours()).padStart(2, "0")}:${String(value.getUTCMinutes()).padStart(2, "0")}`;
+  }
+
+  const raw = String(value || "").trim();
+
+  // PostgreSQL TIME normally arrives as HH:MM:SS.
+  const match = raw.match(/^(\d{1,2}):(\d{2})/);
+
+  if (!match) return "";
+
+  return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}`;
+}
+
+function timeToMinutes(value) {
+  const normalized = normalizeTime(value);
+  const match = normalized.match(/^(\d{2}):(\d{2})$/);
+
+  if (!match) return null;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+
+  if (hours > 23 || minutes > 59) return null;
+
+  return hours * 60 + minutes;
+}
+
 function blockTimeOverlaps(block, start, end) {
+  // Keine Uhrzeit = komplette Sperre für den jeweiligen Tag.
   if (!block.start_time || !block.end_time) return true;
 
-  const blockStart = String(block.start_time).slice(0, 5);
-  const blockEnd = String(block.end_time).slice(0, 5);
+  const blockStart = timeToMinutes(block.start_time);
+  const blockEnd = timeToMinutes(block.end_time);
+  const slotStart = timeToMinutes(start);
+  const slotEnd = timeToMinutes(end);
 
-  return start < blockEnd && end > blockStart;
+  if (
+    blockStart === null ||
+    blockEnd === null ||
+    slotStart === null ||
+    slotEnd === null
+  ) {
+    return false;
+  }
+
+  // Zeitintervalle überschneiden sich:
+  // Slot-Beginn < Sperr-Ende UND Slot-Ende > Sperr-Beginn.
+  return slotStart < blockEnd && slotEnd > blockStart;
 }
 
 function blockAppliesToDate(block, date) {
-  const current = dateFromYmd(date);
-  const startDate = dateFromYmd(block.start_date);
-  const endDate = dateFromYmd(block.end_date || block.start_date);
+  const currentYmd = normalizeYmd(date);
+  const startYmd = normalizeYmd(block.start_date);
+  const endYmd = normalizeYmd(block.end_date || block.start_date);
 
-  if (block.recurrence_type === "once") {
+  if (!currentYmd || !startYmd || !endYmd) return false;
+
+  const current = dateFromYmd(currentYmd);
+  const startDate = dateFromYmd(startYmd);
+  const endDate = dateFromYmd(endYmd);
+
+  if (
+    Number.isNaN(current.getTime()) ||
+    Number.isNaN(startDate.getTime()) ||
+    Number.isNaN(endDate.getTime())
+  ) {
+    return false;
+  }
+
+  const type = String(block.recurrence_type || "once").toLowerCase();
+
+  // Einmalige Sperre: zwischen Start- und Enddatum.
+  if (type === "once") {
     return current >= startDate && current <= endDate;
   }
 
-  const recurrenceEnd = block.recurrence_end_date
-    ? dateFromYmd(block.recurrence_end_date)
+  const recurrenceEndYmd = normalizeYmd(block.recurrence_end_date);
+  const recurrenceEnd = recurrenceEndYmd
+    ? dateFromYmd(recurrenceEndYmd)
     : endDate;
 
-  if (current < startDate || current > recurrenceEnd) return false;
+  if (current < startDate || current > recurrenceEnd) {
+    return false;
+  }
 
-  if (block.recurrence_type === "daily") {
+  if (type === "daily") {
     return true;
   }
 
-  if (block.recurrence_type === "weekly") {
+  if (type === "weekly") {
     const weekdays = Array.isArray(block.weekdays)
-      ? block.weekdays.map(Number)
+      ? block.weekdays.map(Number).filter(Number.isInteger)
       : [];
 
-    const selected = weekdays.length
+    const selectedWeekdays = weekdays.length
       ? weekdays
       : [startDate.getUTCDay()];
 
-    return selected.includes(current.getUTCDay());
+    return selectedWeekdays.includes(current.getUTCDay());
   }
 
-  if (block.recurrence_type === "monthly") {
+  if (type === "monthly") {
     return current.getUTCDate() === startDate.getUTCDate();
   }
 
@@ -939,19 +1017,41 @@ function blockAppliesToDate(block, date) {
 }
 
 async function getActiveBlocksForDate(date) {
-  const result = await pool.query(
-    `SELECT *
-       FROM booking_blocks
-      WHERE active=TRUE
-      ORDER BY start_date, start_time, id`
-  );
+  const selectedDate = normalizeYmd(date);
 
-  return result.rows.filter(block => blockAppliesToDate(block, date));
+  if (!selectedDate) return [];
+
+  // Keine SQL-Datumsfilterung hier: PostgreSQL liefert DATE/TIME je nach
+  // Treiber-Konfiguration unterschiedlich. Die vollständige Prüfung erfolgt
+  // anschließend zuverlässig in JavaScript.
+  const result = await pool.query(`
+    SELECT
+      id,
+      start_date,
+      end_date,
+      start_time,
+      end_time,
+      recurrence_type,
+      weekdays,
+      recurrence_end_date,
+      reason,
+      active
+    FROM booking_blocks
+    WHERE active = TRUE
+    ORDER BY start_date, start_time, id
+  `);
+
+  return result.rows.filter(block =>
+    blockAppliesToDate(block, selectedDate)
+  );
 }
 
 async function isSlotBlocked(date, start, end) {
   const blocks = await getActiveBlocksForDate(date);
-  return blocks.some(block => blockTimeOverlaps(block, start, end));
+
+  return blocks.some(block =>
+    blockTimeOverlaps(block, start, end)
+  );
 }
 
 function recurrenceLabel(block) {
@@ -1744,7 +1844,7 @@ async function getDayState(date) {
     getActiveBlocksForDate(date)
   ]);
 
-  return { bookings, blocks };
+  return { bookings, blocks, date };
 }
 
 function getSlotState(slot, dayState) {
@@ -2148,7 +2248,12 @@ app.post("/book", loginRequired, async (req, res) => {
     );
   }
 
-  if (await isSlotBlocked(date, start, end)) {
+  const bookingDate = normalizeYmd(date);
+
+  if (
+    bookingDate !== date ||
+    await isSlotBlocked(bookingDate, start, end)
+  ) {
     return res.status(409).send(
       page(
         "Buchung nicht möglich",
@@ -2345,7 +2450,7 @@ app.post("/book", loginRequired, async (req, res) => {
 
       [
         req.session.member.id,
-        date,
+        bookingDate,
         start,
         end
       ]
