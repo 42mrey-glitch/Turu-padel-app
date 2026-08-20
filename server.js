@@ -780,6 +780,18 @@ td{
   }
 }
 </style>
+
+<style>
+.terms-fixed{
+  position:fixed;right:16px;bottom:16px;z-index:9999;
+  display:inline-flex;align-items:center;gap:6px;
+  padding:10px 14px;border-radius:999px;
+  background:#0b5ed7;color:#fff;text-decoration:none;
+  font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.25)
+}
+.terms-fixed:hover{filter:brightness(1.08);color:#fff}
+</style>
+
 </head>
 <body>
 
@@ -816,6 +828,7 @@ if ("serviceWorker" in navigator) {
   });
 }
 </script>
+<a class="terms-fixed" href="/terms" aria-label="Nutzungsbedingungen">📜 Nutzungsbedingungen</a>
 </body>
 </html>`;
 }
@@ -1579,6 +1592,58 @@ app.post("/terms/accept", async (req, res) => {
     if (!result.rowCount) return res.redirect("/login");
 
     res.redirect("/login");
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
+
+app.get("/admin/terms", async (req, res) => {
+  try {
+    const user = await currentUser(req);
+    if (!user || user.role !== "admin") return res.status(403).send("Keine Berechtigung");
+
+    const result = await pool.query(`
+      SELECT id, name, email, role, status, terms_accepted_at, terms_version
+      FROM members
+      ORDER BY terms_accepted_at DESC NULLS LAST, name ASC
+    `);
+
+    const rows = result.rows.map(m => `
+      <tr>
+        <td>${esc(m.name || "")}</td>
+        <td>${esc(m.email || "")}</td>
+        <td>${esc(m.role || "")}</td>
+        <td>${esc(m.status || "")}</td>
+        <td>${m.terms_accepted_at ? new Date(m.terms_accepted_at).toLocaleString("de-DE") : "Noch nicht akzeptiert"}</td>
+        <td>${esc(m.terms_version || "Keine Version")}</td>
+      </tr>
+    `).join("");
+
+    res.send(page("Akzeptierte Nutzungsbedingungen", `
+      <div class="card">
+        <h1>📜 Nutzungsbedingungen – Administrator</h1>
+        <p>Hier siehst du, welcher Benutzer wann welche Version der Nutzungsbedingungen akzeptiert hat.</p>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>E-Mail</th>
+                <th>Rolle</th>
+                <th>Status</th>
+                <th>Akzeptiert am</th>
+                <th>Version</th>
+              </tr>
+            </thead>
+            <tbody>${rows || '<tr><td colspan="6">Keine Benutzer vorhanden.</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div class="actions">
+          <a class="btn secondary" href="/admin">Zur Administration</a>
+        </div>
+      </div>`, req));
   } catch (error) {
     console.error(error);
     res.status(500).send("Serverfehler");
@@ -3309,7 +3374,13 @@ app.get("/admin", adminRequired, async (req, res) => {
           <tbody>${bookingRows || '<tr><td colspan="5">Noch keine Buchungen.</td></tr>'}</tbody>
         </table>
       </div>
-    `, req));
+    
+        <div class="card">
+          <h2>📜 Nutzungsbedingungen</h2>
+          <p>Übersicht aller akzeptierten Versionen und Zeitpunkte.</p>
+          <a class="btn secondary" href="/admin/terms">Akzeptierungen anzeigen</a>
+        </div>
+`, req));
   } catch (error) {
     console.error(error);
     res.status(500).send("Serverfehler");
