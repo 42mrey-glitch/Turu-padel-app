@@ -1390,6 +1390,14 @@ async function initDb() {
     );
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_deletions(
+      message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+      member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+      deleted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(message_id, member_id)
+    );
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings(
       id SERIAL PRIMARY KEY,
       member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -3689,9 +3697,11 @@ app.get("/messages", loginRequired, async (req, res) => {
       `SELECT m.*, mr.read_at
        FROM messages m
        LEFT JOIN message_reads mr ON mr.message_id=m.id AND mr.member_id=$1
-       WHERE m.recipient_type='all'
+       LEFT JOIN message_deletions md ON md.message_id=m.id AND md.member_id=$1
+       WHERE md.message_id IS NULL
+         AND (m.recipient_type='all'
           OR (m.recipient_type='member' AND m.recipient_member_id=$1)
-          OR (m.recipient_type='admins' AND $2::boolean=TRUE)
+          OR (m.recipient_type='admins' AND $2::boolean=TRUE))
        ORDER BY m.created_at DESC`,
       [member.id, !!member.admin]
     );
@@ -3700,11 +3710,54 @@ app.get("/messages", loginRequired, async (req, res) => {
         <h2>${esc(m.title)}</h2>
         <p class="muted">Gesendet: ${esc(String(m.created_at))}${m.read_at ? ` · Gelesen: ${esc(String(m.read_at))}` : ' · <b>Neu</b>'}</p>
         <p style="white-space:pre-wrap">${esc(m.body)}</p>
-        ${!m.read_at ? `<form method="post" action="/messages/${m.id}/read"><button class="btn" type="submit">Als gelesen markieren</button></form>` : ''}
+        <div class="actions">
+          ${!m.read_at ? `<form method="post" action="/messages/${m.id}/read"><button class="btn" type="submit">Als gelesen markieren</button></form>` : ''}
+          <form method="post" action="/messages/${m.id}/delete" onsubmit="return confirm('Nachricht wirklich löschen?');">
+            <button class="btn secondary" type="submit">🗑️ Löschen</button>
+          </form>
+        </div>
       </div>`).join("");
     res.send(page("Nachrichten", `<div class="hero"><h1>💬 Nachrichten</h1><p>Deine Nachrichten von TuRU 1880.</p></div>${rows || '<div class="card">Keine Nachrichten vorhanden.</div>'}`, req));
   } catch (error) {
     console.error("Fehler Nachrichten:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
+app.post("/messages/:id/delete", loginRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const member = req.session.member;
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).send("Ungültige Nachricht.");
+    }
+
+    const visible = await pool.query(
+      `SELECT 1 FROM messages
+       WHERE id=$1
+         AND (
+           recipient_type='all'
+           OR (recipient_type='member' AND recipient_member_id=$2)
+           OR (recipient_type='admins' AND $3::boolean=TRUE)
+         )`,
+      [id, member.id, !!member.admin]
+    );
+
+    if (!visible.rowCount) {
+      return res.status(404).send("Nachricht nicht gefunden.");
+    }
+
+    await pool.query(
+      `INSERT INTO message_deletions(message_id,member_id)
+       VALUES($1,$2)
+       ON CONFLICT(message_id,member_id) DO NOTHING`,
+      [id, member.id]
+    );
+
+    res.redirect("/messages");
+  } catch (error) {
+    console.error("Fehler persönliche Nachricht löschen:", error);
     res.status(500).send("Serverfehler");
   }
 });
@@ -3736,14 +3789,7 @@ app.get("/admin/messages", adminRequired, async (req, res) => {
       <td><b>${esc(m.title)}</b><br><span class="muted">${esc(String(m.created_at))}</span></td>
       <td>${m.recipient_type==='all'?'Alle Nutzer':m.recipient_type==='admins'?'Administratoren':'Einzelner Nutzer'}</td>
       <td>${m.read_count}</td>
-      <td>
-        <div class="actions">
-          <a class="btn" href="/admin/messages/${m.id}/reads">Lesestatus</a>
-          <form method="post" action="/admin/messages/${m.id}/delete" style="display:inline" onsubmit="return confirm('Nachricht wirklich endgültig löschen?');">
-            <button class="btn" type="submit">🗑️ Löschen</button>
-          </form>
-        </div>
-      </td></tr>`).join("");
+      <td><a class="btn" href="/admin/messages/${m.id}/reads">Lesestatus</a></td></tr>`).join("");
     res.send(page("Kommunikation", `
       <div class="hero"><h1>📣 Kommunikations-Zentrale</h1><p>Nachrichten senden und Lesestatus prüfen.</p></div>
       <div class="card"><h2>Neue Nachricht</h2>
@@ -3781,29 +3827,6 @@ app.post("/admin/messages/send", adminRequired, async (req, res) => {
     await sendPushToMembers(recipientRows.rows.map(r => r.id), title, body);
     res.redirect("/admin/messages");
   } catch(error) { console.error(error); res.status(500).send("Serverfehler"); }
-});
-
-app.post("/admin/messages/:id/delete", adminRequired, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).send("Ungültige Nachricht.");
-    }
-
-    const result = await pool.query(
-      "DELETE FROM messages WHERE id=$1 RETURNING id",
-      [id]
-    );
-
-    if (!result.rowCount) {
-      return res.status(404).send("Nachricht nicht gefunden.");
-    }
-
-    res.redirect("/admin/messages");
-  } catch (error) {
-    console.error("Fehler Nachricht löschen:", error);
-    res.status(500).send("Serverfehler");
-  }
 });
 
 app.get("/admin/messages/:id/reads", adminRequired, async (req,res)=>{
