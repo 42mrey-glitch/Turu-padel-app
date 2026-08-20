@@ -1779,7 +1779,7 @@ app.get("/login", (req, res) => {
 
         <h2>Mitglieder-Login</h2>
 
-        <form method="post" action="/login" onsubmit="return confirm('Wirklich Administratorrechte vergeben?');">
+        <form method="post" action="/login">
 
           <label>E-Mail</label>
 
@@ -1846,39 +1846,39 @@ app.post("/login", async (req, res) => {
       result.rows[0];
 
 
-    if (
-      !member ||
-      !(await bcrypt.compare(
-        password,
-        member.password_hash
-      ))
-    ) {
-
+    if (!member) {
       return res.status(401).send(
-
         page(
-          "Login",
-
+          "Benutzerkonto nicht gefunden",
           `
-          <div class="card error">
-
-            <h2>Login fehlgeschlagen</h2>
-
-            <p>
-              E-Mail oder Passwort ist falsch.
-            </p>
-
+          <div class="card warn">
+            <h2>Benutzerkonto nicht gefunden</h2>
+            <p>Für diese E-Mail-Adresse ist kein Benutzerkonto vorhanden.</p>
+            <p>Bitte registriere dich zuerst, bevor du dich anmelden kannst.</p>
             <div class="actions">
-
-              <a class="btn secondary" href="/login">
-                Zurück zum Login
-              </a>
-
+              <a class="btn" href="/register">Jetzt registrieren</a>
+              <a class="btn secondary" href="/login">Zurück zum Login</a>
             </div>
-
           </div>
           `,
+          req
+        )
+      );
+    }
 
+    if (!(await bcrypt.compare(password, member.password_hash))) {
+      return res.status(401).send(
+        page(
+          "Login fehlgeschlagen",
+          `
+          <div class="card error">
+            <h2>Login fehlgeschlagen</h2>
+            <p>Das Passwort ist falsch.</p>
+            <div class="actions">
+              <a class="btn secondary" href="/login">Zurück zum Login</a>
+            </div>
+          </div>
+          `,
           req
         )
       );
