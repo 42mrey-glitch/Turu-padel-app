@@ -857,7 +857,8 @@ function nav(req) {
     ${req.session.member.admin
       ? `<a class="${active("/admin")}" href="/admin">Administration</a>`
       : ""}
-    <form method="post" action="/logout">
+    <a href="/messages">💬 Nachrichten</a>
+      <form method="post" action="/logout">
       <button type="submit">Abmelden</button>
     </form>
   </nav>`;
@@ -1255,6 +1256,26 @@ async function initDb() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_membership_applications_email
     ON membership_applications(email);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages(
+      id SERIAL PRIMARY KEY,
+      sender_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      recipient_type TEXT NOT NULL DEFAULT 'all',
+      recipient_member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_reads(
+      message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+      member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+      read_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(message_id, member_id)
+    );
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings(
@@ -3475,6 +3496,109 @@ app.post("/cancel/:id", loginRequired, async (req, res) => {
 });
 
 
+
+app.get("/messages", loginRequired, async (req, res) => {
+  try {
+    const member = req.session.member;
+    const result = await pool.query(
+      `SELECT m.*, mr.read_at
+       FROM messages m
+       LEFT JOIN message_reads mr ON mr.message_id=m.id AND mr.member_id=$1
+       WHERE m.recipient_type='all'
+          OR (m.recipient_type='member' AND m.recipient_member_id=$1)
+          OR (m.recipient_type='admins' AND $2::boolean=TRUE)
+       ORDER BY m.created_at DESC`,
+      [member.id, !!member.admin]
+    );
+    const rows = result.rows.map(m => `
+      <div class="card">
+        <h2>${esc(m.title)}</h2>
+        <p class="muted">Gesendet: ${esc(String(m.created_at))}${m.read_at ? ` · Gelesen: ${esc(String(m.read_at))}` : ' · <b>Neu</b>'}</p>
+        <p style="white-space:pre-wrap">${esc(m.body)}</p>
+        ${!m.read_at ? `<form method="post" action="/messages/${m.id}/read"><button class="btn" type="submit">Als gelesen markieren</button></form>` : ''}
+      </div>`).join("");
+    res.send(page("Nachrichten", `<div class="hero"><h1>💬 Nachrichten</h1><p>Deine Nachrichten von TuRU 1880.</p></div>${rows || '<div class="card">Keine Nachrichten vorhanden.</div>'}`, req));
+  } catch (error) {
+    console.error("Fehler Nachrichten:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
+app.post("/messages/:id/read", loginRequired, async (req, res) => {
+  try {
+    await pool.query(
+      `INSERT INTO message_reads(message_id,member_id,read_at) VALUES($1,$2,NOW())
+       ON CONFLICT(message_id,member_id) DO NOTHING`,
+      [Number(req.params.id), req.session.member.id]
+    );
+    res.redirect("/messages");
+  } catch (error) {
+    console.error("Fehler Lesestatus:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
+app.get("/admin/messages", adminRequired, async (req, res) => {
+  try {
+    const [messagesResult, membersResult] = await Promise.all([
+      pool.query(`SELECT m.*, COUNT(mr.member_id)::int AS read_count
+                  FROM messages m LEFT JOIN message_reads mr ON mr.message_id=m.id
+                  GROUP BY m.id ORDER BY m.created_at DESC`),
+      pool.query(`SELECT id,name,email FROM members WHERE COALESCE(blocked,FALSE)=FALSE ORDER BY name,email`)
+    ]);
+    const options = membersResult.rows.map(m => `<option value="${m.id}">${esc(m.name)} (${esc(m.email)})</option>`).join("");
+    const rows = messagesResult.rows.map(m => `<tr>
+      <td><b>${esc(m.title)}</b><br><span class="muted">${esc(String(m.created_at))}</span></td>
+      <td>${m.recipient_type==='all'?'Alle Nutzer':m.recipient_type==='admins'?'Administratoren':'Einzelner Nutzer'}</td>
+      <td>${m.read_count}</td>
+      <td><a class="btn" href="/admin/messages/${m.id}/reads">Lesestatus</a></td></tr>`).join("");
+    res.send(page("Kommunikation", `
+      <div class="hero"><h1>📣 Kommunikations-Zentrale</h1><p>Nachrichten senden und Lesestatus prüfen.</p></div>
+      <div class="card"><h2>Neue Nachricht</h2>
+        <form method="post" action="/admin/messages/send">
+          <label>Titel</label><input name="title" maxlength="200" required>
+          <label>Nachricht</label><textarea name="body" rows="7" required></textarea>
+          <label>Empfänger</label>
+          <select name="recipient_type" id="recipient_type" onchange="document.getElementById('singleMember').style.display=this.value==='member'?'block':'none'">
+            <option value="all">Alle Nutzer</option><option value="admins">Nur Administratoren</option><option value="member">Einzelner Nutzer</option>
+          </select>
+          <div id="singleMember" style="display:none"><label>Benutzer auswählen</label><select name="recipient_member_id">${options}</select></div>
+          <div class="actions"><button class="btn" type="submit">Nachricht senden</button></div>
+        </form>
+      </div>
+      <div class="card"><h2>Gesendete Nachrichten</h2><table><thead><tr><th>Nachricht</th><th>Empfänger</th><th>Gelesen</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="4">Noch keine Nachrichten.</td></tr>'}</tbody></table></div>`, req));
+  } catch (error) {
+    console.error("Fehler Kommunikations-Zentrale:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
+app.post("/admin/messages/send", adminRequired, async (req, res) => {
+  try {
+    const title=String(req.body.title||"").trim(), body=String(req.body.body||"").trim();
+    const type=String(req.body.recipient_type||"all");
+    const memberId=type==="member"?Number(req.body.recipient_member_id):null;
+    if(!title||!body||!["all","admins","member"].includes(type)) return res.status(400).send("Bitte alle Angaben prüfen.");
+    if(type==="member" && (!Number.isInteger(memberId)||memberId<=0)) return res.status(400).send("Bitte einen Benutzer auswählen.");
+    await pool.query(`INSERT INTO messages(sender_id,title,body,recipient_type,recipient_member_id) VALUES($1,$2,$3,$4,$5)`,
+      [req.session.member.id,title,body,type,memberId]);
+    res.redirect("/admin/messages");
+  } catch(error) { console.error(error); res.status(500).send("Serverfehler"); }
+});
+
+app.get("/admin/messages/:id/reads", adminRequired, async (req,res)=>{
+  try {
+    const id=Number(req.params.id);
+    const [msg,reads]=await Promise.all([
+      pool.query("SELECT * FROM messages WHERE id=$1",[id]),
+      pool.query(`SELECT m.name,m.email,r.read_at FROM message_reads r JOIN members m ON m.id=r.member_id WHERE r.message_id=$1 ORDER BY r.read_at DESC`,[id])
+    ]);
+    if(!msg.rowCount) return res.status(404).send("Nachricht nicht gefunden.");
+    const rows=reads.rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(String(r.read_at))}</td></tr>`).join("");
+    res.send(page("Lesestatus", `<div class="card"><h1>${esc(msg.rows[0].title)}</h1><p style="white-space:pre-wrap">${esc(msg.rows[0].body)}</p></div><div class="card"><h2>Lesestatus</h2><table><thead><tr><th>Name</th><th>E-Mail</th><th>Gelesen am</th></tr></thead><tbody>${rows||'<tr><td colspan="3">Noch niemand.</td></tr>'}</tbody></table><div class="actions"><a class="btn secondary" href="/admin/messages">Zurück</a></div></div>`,req));
+  } catch(error) { console.error(error); res.status(500).send("Serverfehler"); }
+});
+
 app.get("/admin", adminRequired, async (req, res) => {
   try {
     const [membersResult, bookingsResult, blocksResult, membershipResult, statsResult] =
@@ -3680,7 +3804,13 @@ app.get("/admin", adminRequired, async (req, res) => {
       </div>
 
       <div class="grid">
-        <div class="card"><h2>Mitglieder</h2><p><b>${approved}</b> freigeschaltet</p></div>
+        
+      <div class="card">
+        <h2>📣 Kommunikation</h2>
+        <p>Nachrichten an alle Nutzer, Administratoren oder einzelne Benutzer senden und Lesestatus prüfen.</p>
+        <a class="btn" href="/admin/messages">Kommunikations-Zentrale öffnen</a>
+      </div>
+<div class="card"><h2>Mitglieder</h2><p><b>${approved}</b> freigeschaltet</p></div>
         <div class="card"><h2>Wartend</h2><p><b>${pending}</b> Registrierungen</p></div>
         <div class="card"><h2>Administratoren</h2><p><b>${adminCount}</b></p></div>
         <div class="card"><h2>Buchungen</h2><p><b>${totalBookings}</b> insgesamt</p></div>
@@ -4311,163 +4441,7 @@ initDb()
 
   .then(() => {
 
-    
-
-// =====================================================
-// KOMMUNIKATIONS-ZENTRALE
-// =====================================================
-
-function messageAudienceSql(userId, userRole) {
-  // Alle aktiven Nutzer sehen Nachrichten an alle, ihre Rolle oder direkt an sie.
-  return {
-    text: `
-      (
-        m.target_type = 'all'
-        OR (m.target_type = 'user' AND m.target_value = $1)
-        OR (m.target_type = 'role' AND LOWER(m.target_value) = LOWER($2))
-      )
-    `,
-    values: [String(userId), String(userRole || 'user')]
-  };
-}
-
-app.get("/messages", requireAuth, async (req, res) => {
-  try {
-    const currentUser = req.user;
-    const audience = messageAudienceSql(currentUser.id, currentUser.role);
-
-    const result = await pool.query(`
-      SELECT
-        m.*,
-        CASE WHEN r.id IS NULL THEN FALSE ELSE TRUE END AS is_read,
-        r.read_at
-      FROM app_messages m
-      LEFT JOIN app_message_reads r
-        ON r.message_id = m.id AND r.user_id = $1
-      WHERE ${audience.text}
-      ORDER BY m.created_at DESC
-    `, [currentUser.id, ...audience.values]);
-
-    res.render("messages", { messages: result.rows, currentUser });
-  } catch (err) {
-    console.error("Fehler Nachrichten:", err);
-    res.status(500).send("Nachrichten konnten nicht geladen werden.");
-  }
-});
-
-app.post("/messages/:id/read", requireAuth, async (req, res) => {
-  try {
-    const messageId = Number(req.params.id);
-    await pool.query(`
-      INSERT INTO app_message_reads (message_id, user_id, read_at)
-      VALUES ($1, $2, CURRENT_TIMESTAMP)
-      ON CONFLICT (message_id, user_id)
-      DO UPDATE SET read_at = EXCLUDED.read_at
-    `, [messageId, req.user.id]);
-
-    res.redirect("/messages");
-  } catch (err) {
-    console.error("Fehler Lesestatus:", err);
-    res.status(500).send("Lesestatus konnte nicht gespeichert werden.");
-  }
-});
-
-app.get("/admin/messages", requireAdmin, async (req, res) => {
-  try {
-    const [messages, users] = await Promise.all([
-      pool.query(`
-        SELECT
-          m.*,
-          COUNT(DISTINCT r.user_id)::int AS read_count
-        FROM app_messages m
-        LEFT JOIN app_message_reads r ON r.message_id = m.id
-        GROUP BY m.id
-        ORDER BY m.created_at DESC
-      `),
-      pool.query(`
-        SELECT id, first_name, last_name, alias, email, role
-        FROM users
-        WHERE COALESCE(status, 'active') = 'active'
-        ORDER BY first_name, last_name, email
-      `)
-    ]);
-
-    res.render("admin-messages", {
-      messages: messages.rows,
-      users: users.rows,
-      currentUser: req.user
-    });
-  } catch (err) {
-    console.error("Fehler Admin-Nachrichten:", err);
-    res.status(500).send("Kommunikations-Zentrale konnte nicht geladen werden.");
-  }
-});
-
-app.post("/admin/messages/send", requireAdmin, async (req, res) => {
-  try {
-    const { title, body, target_type, target_value } = req.body;
-
-    if (!String(title || "").trim() || !String(body || "").trim()) {
-      return res.status(400).send("Titel und Nachricht sind erforderlich.");
-    }
-
-    const allowed = ["all", "role", "user"];
-    const targetType = allowed.includes(target_type) ? target_type : "all";
-    const targetValue = targetType === "all" ? null : String(target_value || "").trim();
-
-    if (targetType !== "all" && !targetValue) {
-      return res.status(400).send("Bitte wähle eine Gruppe oder einen Nutzer aus.");
-    }
-
-    await pool.query(`
-      INSERT INTO app_messages
-        (sender_id, title, body, target_type, target_value, created_at)
-      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-    `, [req.user.id, String(title).trim(), String(body).trim(), targetType, targetValue]);
-
-    res.redirect("/admin/messages");
-  } catch (err) {
-    console.error("Fehler Nachricht senden:", err);
-    res.status(500).send("Nachricht konnte nicht gesendet werden.");
-  }
-});
-
-app.get("/admin/messages/:id/reads", requireAdmin, async (req, res) => {
-  try {
-    const messageId = Number(req.params.id);
-    const [messageResult, readsResult] = await Promise.all([
-      pool.query("SELECT * FROM app_messages WHERE id = $1", [messageId]),
-      pool.query(`
-        SELECT
-          r.read_at,
-          u.id,
-          u.first_name,
-          u.last_name,
-          u.alias,
-          u.email
-        FROM app_message_reads r
-        JOIN users u ON u.id = r.user_id
-        WHERE r.message_id = $1
-        ORDER BY r.read_at DESC
-      `, [messageId])
-    ]);
-
-    if (!messageResult.rows.length) {
-      return res.status(404).send("Nachricht nicht gefunden.");
-    }
-
-    res.render("message-reads", {
-      message: messageResult.rows[0],
-      reads: readsResult.rows,
-      currentUser: req.user
-    });
-  } catch (err) {
-    console.error("Fehler Leseliste:", err);
-    res.status(500).send("Lesestatus konnte nicht geladen werden.");
-  }
-});
-
-app.listen(
+    app.listen(
       PORT,
       "0.0.0.0",
       () => {
