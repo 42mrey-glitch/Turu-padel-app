@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Kommunikations-Zentrale</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#f4f6f8;color:#1d2b3a}
+.wrap{max-width:1050px;margin:30px auto;padding:0 18px}
+.card{background:#fff;border-radius:12px;padding:22px;margin-bottom:18px;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.btn{display:inline-block;background:#173b68;color:#fff;padding:10px 14px;border:0;border-radius:7px;text-decoration:none;cursor:pointer}
+.btn.secondary{background:#68737d}.unread{border-left:6px solid #d59b16}.meta{color:#68737d;font-size:.9em}
+textarea,input,select{width:100%;box-sizing:border-box;padding:10px;margin:6px 0 14px;border:1px solid #ccd3da;border-radius:7px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body><div class="wrap">
+<h1>📣 Kommunikations-Zentrale</h1>
+<a class="btn secondary" href="/admin">← Admin-Bereich</a>
+<div class="card"><h2>Neue Nachricht senden</h2>
+<form method="post" action="/admin/messages/send">
+<label>Titel</label><input name="title" required maxlength="200">
+<label>Nachricht</label><textarea name="body" rows="7" required></textarea>
+<div class="grid">
+<div><label>Empfänger</label>
+<select id="target_type" name="target_type" onchange="toggleTarget()">
+<option value="all">Alle Nutzer</option>
+<option value="role">Bestimmte Gruppe / Rolle</option>
+<option value="user">Einzelner Nutzer</option>
+</select></div>
+<div id="target_box"><label id="target_label">Gruppe</label>
+<select id="role_target" name="target_value"><option value="user">Normale Nutzer</option><option value="admin">Administratoren</option></select>
+<select id="user_target" style="display:none" disabled>
+<% users.forEach(u => { %><option value="<%= u.id %>"><%= [u.first_name,u.last_name].filter(Boolean).join(' ') || u.alias || u.email %> (<%= u.email %>)</option><% }) %>
+</select></div></div>
+<button class="btn" type="submit">Nachricht senden</button>
+</form></div>
+<div class="card"><h2>Gesendete Nachrichten</h2>
+<% if (!messages.length) { %><p>Noch keine Nachrichten gesendet.</p><% } %>
+<% messages.forEach(m => { %><div style="padding:14px 0;border-bottom:1px solid #e5e8eb"><b><%= m.title %></b><br>
+<span class="meta"><%= new Date(m.created_at).toLocaleString('de-DE') %> · Ziel: <%= m.target_type === 'all' ? 'Alle Nutzer' : m.target_type === 'role' ? 'Gruppe: '+m.target_value : 'Nutzer-ID: '+m.target_value %> · <%= m.read_count %> gelesen</span><br>
+<a class="btn" style="margin-top:8px" href="/admin/messages/<%= m.id %>/reads">Lesestatus ansehen</a></div><% }) %>
+</div></div>
+<script>
+function toggleTarget(){
+ const type=document.getElementById('target_type').value;
+ const role=document.getElementById('role_target'), user=document.getElementById('user_target');
+ role.style.display=type==='role'?'block':'none'; role.disabled=type!=='role';
+ user.style.display=type==='user'?'block':'none'; user.disabled=type!=='user';
+ if(type==='user') user.name='target_value'; else role.name='target_value';
+}
+toggleTarget();
+</script></body></html>
