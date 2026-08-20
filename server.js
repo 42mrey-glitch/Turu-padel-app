@@ -53,7 +53,7 @@ app.use(session({
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 1000 * 60 * 30
+    maxAge: 1000 * 60 * 60 * 24 * 365
   }
 }));
 
@@ -967,34 +967,36 @@ function nav(req) {
   </nav>`;
 }
 
-const INACTIVITY_TIMEOUT_MS = 1000 * 60 * 30;
-
-async function destroyMemberSessions(memberId) {
-  await pool.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%\"id\":${Number(memberId)}%`]);
-}
-
-function touchSession(req) {
-  if (req.session) req.session.lastActivity = Date.now();
-}
-
 function loginRequired(req, res, next) {
   if (!req.session.member) return res.redirect("/login");
-  const last = Number(req.session.lastActivity || Date.now());
-  if (Date.now() - last > INACTIVITY_TIMEOUT_MS) {
-    return req.session.destroy(() => res.redirect("/login?reason=inactive"));
-  }
+
+  // Keine automatische Abmeldung wegen Inaktivität.
+  // Der Login bleibt bestehen, solange der Nutzer sich nicht selbst abmeldet
+  // oder der Administrator den Account sperrt/löscht bzw. die Session-Version ändert.
   pool.query("SELECT id,name,email,status,admin,session_version FROM members WHERE id=$1", [req.session.member.id])
     .then(result => {
       const member = result.rows[0];
+
+      // Admin-Statusänderungen, Sperrungen und andere sicherheitsrelevante
+      // Änderungen erhöhen session_version. Dadurch wird eine bestehende
+      // Anmeldung beim nächsten Zugriff sofort ungültig.
       if (!member || member.status !== "approved" || Number(req.session.sessionVersion || 1) !== Number(member.session_version || 1)) {
         return req.session.destroy(() => res.redirect("/login?reason=changed"));
       }
-      req.session.member = { id: member.id, name: member.name, email: member.email, admin: member.admin };
+
+      req.session.member = {
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        admin: member.admin
+      };
       req.session.sessionVersion = Number(member.session_version || 1);
-      touchSession(req);
       next();
     })
-    .catch(error => { console.error(error); res.status(500).send("Serverfehler"); });
+    .catch(error => {
+      console.error(error);
+      res.status(500).send("Serverfehler");
+    });
 }
 
 function adminRequired(req, res, next) {
@@ -2439,7 +2441,6 @@ app.post("/login", async (req, res) => {
     req.session.member.hasActiveBooking = loginBooking.rowCount > 0;
 
     req.session.sessionVersion = Number(member.session_version || 1);
-    req.session.lastActivity = Date.now();
 
 
     res.redirect("/");
@@ -2455,7 +2456,6 @@ app.post("/login", async (req, res) => {
 });
 
 
-app.get("/logout-inactive", (req, res) => { req.session.destroy(() => res.redirect("/login?reason=inactive")); });
 
 app.post("/logout", (req, res) => {
 
@@ -4855,6 +4855,8 @@ app.post("/admin/block/:id", adminRequired, async (req,res)=>{
     if(!r.rowCount) return res.redirect("/admin");
     const member=r.rows[0];
     await pool.query("UPDATE members SET status='blocked', session_version=session_version+1 WHERE id=$1",[targetId]);
+    // Gesperrte Mitglieder sollen keine weiteren Push-Nachrichten erhalten.
+    await pool.query("DELETE FROM push_subscriptions WHERE member_id=$1",[targetId]);
     await logMemberChange({
       member,action:"blocked",oldStatus:member.status,newStatus:"blocked",
       oldAdmin:false,newAdmin:false,changedBy:Number(req.session.member.id)
