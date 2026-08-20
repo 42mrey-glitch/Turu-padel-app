@@ -944,7 +944,7 @@ function nav(req) {
       <a class="${active("/", true)}" href="/">Startseite</a>
       <a class="${active("/login", true)}" href="/login">Mitglieder-Login</a>
       <a class="${active("/register", true)}" href="/register">Registrieren</a>
-      <a class="${active("/membership")}" href="/membership">Mitgliedsantrag</a>
+      <a class="${active("/membership")}" href="/membership">Als Mitglied anmelden</a>
     </nav>`;
   }
 
@@ -1390,6 +1390,14 @@ async function initDb() {
     );
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_deletions(
+      message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+      member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+      deleted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(message_id, member_id)
+    );
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings(
       id SERIAL PRIMARY KEY,
       member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -1627,7 +1635,7 @@ app.get("/terms", (req, res) => {
 app.get("/membership", (req, res) => {
   res.send(page("Als Mitglied anmelden", `
     <div class="hero">
-      <h1>Mitgliedsantrag</h1>
+      <h1>Als Mitglied anmelden</h1>
       <p>Werde Mitglied bei TuRU 1880 und reiche deinen Mitgliedsantrag online ein.</p>
     </div>
 
@@ -1821,7 +1829,7 @@ app.get("/register", (req, res) => {
       `
       <div class="card">
 
-        <h2>Mitgliedsantrag</h2>
+        <h2>Mitglied registrieren</h2>
 
         <p class="muted">
           Nach der Registrierung muss der Administrator
@@ -3689,9 +3697,11 @@ app.get("/messages", loginRequired, async (req, res) => {
       `SELECT m.*, mr.read_at
        FROM messages m
        LEFT JOIN message_reads mr ON mr.message_id=m.id AND mr.member_id=$1
-       WHERE m.recipient_type='all'
+       LEFT JOIN message_deletions md ON md.message_id=m.id AND md.member_id=$1
+       WHERE md.message_id IS NULL
+         AND (m.recipient_type='all'
           OR (m.recipient_type='member' AND m.recipient_member_id=$1)
-          OR (m.recipient_type='admins' AND $2::boolean=TRUE)
+          OR (m.recipient_type='admins' AND $2::boolean=TRUE))
        ORDER BY m.created_at DESC`,
       [member.id, !!member.admin]
     );
@@ -3700,11 +3710,54 @@ app.get("/messages", loginRequired, async (req, res) => {
         <h2>${esc(m.title)}</h2>
         <p class="muted">Gesendet: ${esc(String(m.created_at))}${m.read_at ? ` · Gelesen: ${esc(String(m.read_at))}` : ' · <b>Neu</b>'}</p>
         <p style="white-space:pre-wrap">${esc(m.body)}</p>
-        ${!m.read_at ? `<form method="post" action="/messages/${m.id}/read"><button class="btn" type="submit">Als gelesen markieren</button></form>` : ''}
+        <div class="actions">
+          ${!m.read_at ? `<form method="post" action="/messages/${m.id}/read"><button class="btn" type="submit">Als gelesen markieren</button></form>` : ''}
+          <form method="post" action="/messages/${m.id}/delete" onsubmit="return confirm('Nachricht wirklich löschen?');">
+            <button class="btn secondary" type="submit">🗑️ Löschen</button>
+          </form>
+        </div>
       </div>`).join("");
     res.send(page("Nachrichten", `<div class="hero"><h1>💬 Nachrichten</h1><p>Deine Nachrichten von TuRU 1880.</p></div>${rows || '<div class="card">Keine Nachrichten vorhanden.</div>'}`, req));
   } catch (error) {
     console.error("Fehler Nachrichten:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
+app.post("/messages/:id/delete", loginRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const member = req.session.member;
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).send("Ungültige Nachricht.");
+    }
+
+    const visible = await pool.query(
+      `SELECT 1 FROM messages
+       WHERE id=$1
+         AND (
+           recipient_type='all'
+           OR (recipient_type='member' AND recipient_member_id=$2)
+           OR (recipient_type='admins' AND $3::boolean=TRUE)
+         )`,
+      [id, member.id, !!member.admin]
+    );
+
+    if (!visible.rowCount) {
+      return res.status(404).send("Nachricht nicht gefunden.");
+    }
+
+    await pool.query(
+      `INSERT INTO message_deletions(message_id,member_id)
+       VALUES($1,$2)
+       ON CONFLICT(message_id,member_id) DO NOTHING`,
+      [id, member.id]
+    );
+
+    res.redirect("/messages");
+  } catch (error) {
+    console.error("Fehler persönliche Nachricht löschen:", error);
     res.status(500).send("Serverfehler");
   }
 });
@@ -3933,9 +3986,26 @@ app.get("/admin", adminRequired, async (req, res) => {
         rejected: '<span class="badge error">Abgelehnt</span>',
         cancelled: '<span class="badge">Gekündigt</span>'
       };
-      let actions = "";
+      const forwardSubject = encodeURIComponent(`Mitgliedsantrag – ${application.first_name} ${application.last_name}`);
+      const forwardBody = encodeURIComponent(
+        `Mitgliedsantrag von ${application.first_name} ${application.last_name}\n` +
+        `E-Mail: ${application.email}\n` +
+        `Telefon: ${application.phone || "–"}\n` +
+        `Adresse: ${application.street} ${application.house_number}, ${application.postal_code} ${application.city}\n` +
+        `Geburtsdatum: ${normalizeYmd(application.birth_date)}\n` +
+        `Tarif: ${planLabel}\n` +
+        `Kontoinhaber: ${application.account_holder}\n` +
+        `IBAN: ${application.iban_masked}\n` +
+        `Antrag eingegangen: ${normalizeYmd(application.created_at)}`
+      );
+      let actions = `
+        <div class="actions" style="margin-bottom:8px">
+          <a class="btn secondary" href="/admin/membership/${application.id}/view">👁️ Öffnen</a>
+          <a class="btn secondary" href="/admin/membership/${application.id}/view?print=1" target="_blank">🖨️ PDF/Drucken</a>
+          <a class="btn secondary" href="mailto:?subject=${forwardSubject}&body=${forwardBody}">✉️ Weiterleiten</a>
+        </div>`;
       if (application.status === "pending") {
-        actions = `
+        actions += `
           <form method="post" action="/admin/membership/${application.id}/approve" style="display:inline" onsubmit="return confirm('Mitgliedsantrag wirklich annehmen?');">
             <button class="btn" type="submit">Annehmen</button>
           </form>
@@ -3943,7 +4013,7 @@ app.get("/admin", adminRequired, async (req, res) => {
             <button class="btn danger" type="submit">Ablehnen</button>
           </form>`;
       } else if (application.status === "approved") {
-        actions = `
+        actions += `
           <form method="post" action="/membership/cancel/${application.id}" style="display:inline" onsubmit="return confirm('Mitgliedschaft wirklich kündigen? Das Wirksamkeitsdatum wird nach dem gewählten Tarif berechnet.');">
             <button class="btn danger" type="submit">Kündigen</button>
           </form>`;
@@ -4245,6 +4315,111 @@ app.post("/admin/block/delete/:id", adminRequired, async (req, res) => {
 
 
 
+
+app.get("/admin/membership/:id/view", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).send("Ungültiger Mitgliedsantrag.");
+    }
+
+    const result = await pool.query(
+      `SELECT *
+       FROM membership_applications
+       WHERE id=$1`,
+      [id]
+    );
+
+    if (!result.rowCount) {
+      return res.status(404).send("Mitgliedsantrag nicht gefunden.");
+    }
+
+    const a = result.rows[0];
+    const planLabel = a.plan === "annual" ? "Jährlich – 250 €" : "Monatlich – 25 €";
+    const statusLabels = {
+      pending: "Beantragt",
+      approved: "Angenommen",
+      rejected: "Abgelehnt",
+      cancelled: "Gekündigt"
+    };
+
+    const printMode = req.query.print === "1";
+    const mailSubject = encodeURIComponent(`Mitgliedsantrag – ${a.first_name} ${a.last_name}`);
+    const mailBody = encodeURIComponent(
+      `Mitgliedsantrag von ${a.first_name} ${a.last_name}\n` +
+      `E-Mail: ${a.email}\nTelefon: ${a.phone || "–"}\n` +
+      `Adresse: ${a.street} ${a.house_number}, ${a.postal_code} ${a.city}\n` +
+      `Geburtsdatum: ${normalizeYmd(a.birth_date)}\n` +
+      `Tarif: ${planLabel}\n` +
+      `Kontoinhaber: ${a.account_holder}\nIBAN: ${a.iban_masked}\n` +
+      `Antrag eingegangen: ${normalizeYmd(a.created_at)}`
+    );
+
+    res.send(page("Mitgliedsantrag", `
+      <div class="card membership-detail ${printMode ? "print-mode" : ""}">
+        <div class="actions no-print">
+          <a class="btn secondary" href="/admin">← Zurück</a>
+          <button class="btn" type="button" onclick="window.print()">🖨️ Als PDF speichern / Drucken</button>
+          <a class="btn secondary" href="mailto:?subject=${mailSubject}&body=${mailBody}">✉️ Weiterleiten</a>
+        </div>
+
+        <h1>📝 Mitgliedsantrag</h1>
+        <p class="muted">Antragsnummer: ${a.id} · Eingegangen: ${esc(normalizeYmd(a.created_at))}</p>
+
+        <h2>Persönliche Daten</h2>
+        <table>
+          <tr><th>Vorname</th><td>${esc(a.first_name)}</td></tr>
+          <tr><th>Nachname</th><td>${esc(a.last_name)}</td></tr>
+          <tr><th>Geburtsdatum</th><td>${esc(normalizeYmd(a.birth_date))}</td></tr>
+          <tr><th>E-Mail</th><td>${esc(a.email)}</td></tr>
+          <tr><th>Telefon</th><td>${esc(a.phone || "–")}</td></tr>
+        </table>
+
+        <h2>Adresse</h2>
+        <table>
+          <tr><th>Straße</th><td>${esc(a.street)} ${esc(a.house_number)}</td></tr>
+          <tr><th>PLZ / Ort</th><td>${esc(a.postal_code)} ${esc(a.city)}</td></tr>
+        </table>
+
+        <h2>Mitgliedschaft</h2>
+        <table>
+          <tr><th>Tarif</th><td>${esc(planLabel)}</td></tr>
+          <tr><th>Status</th><td>${esc(statusLabels[a.status] || a.status)}</td></tr>
+          <tr><th>Mitgliedschaft ab</th><td>${a.membership_start ? esc(normalizeYmd(a.membership_start)) : "–"}</td></tr>
+          <tr><th>Mindestende</th><td>${a.minimum_end_date ? esc(normalizeYmd(a.minimum_end_date)) : "–"}</td></tr>
+          <tr><th>Kündigung wirksam</th><td>${a.cancellation_effective_date ? esc(normalizeYmd(a.cancellation_effective_date)) : "–"}</td></tr>
+        </table>
+
+        <h2>SEPA-Lastschrift</h2>
+        <table>
+          <tr><th>Kontoinhaber</th><td>${esc(a.account_holder)}</td></tr>
+          <tr><th>IBAN</th><td>${esc(a.iban_masked)}</td></tr>
+          <tr><th>SEPA akzeptiert</th><td>${a.sepa_accepted ? "Ja" : "Nein"}</td></tr>
+          <tr><th>Antrag akzeptiert</th><td>${a.application_accepted ? "Ja" : "Nein"}</td></tr>
+        </table>
+
+        ${a.notes ? `<h2>Notizen</h2><p style="white-space:pre-wrap">${esc(a.notes)}</p>` : ""}
+
+        <div class="actions no-print" style="margin-top:20px">
+          <a class="btn secondary" href="/admin">Zurück zur Administration</a>
+        </div>
+      </div>
+      <style>
+        .membership-detail table{width:100%;border-collapse:collapse;margin-bottom:20px}
+        .membership-detail th,.membership-detail td{padding:10px;border-bottom:1px solid #ddd;text-align:left}
+        .membership-detail th{width:220px;background:#f5f7fa}
+        @media print {
+          .no-print{display:none!important}
+          body{background:#fff!important}
+          .membership-detail{box-shadow:none!important;border:0!important}
+        }
+      </style>
+    `, req));
+  } catch (error) {
+    console.error("Fehler Mitgliedsantrag öffnen:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
 
 app.post("/admin/membership/:id/approve", adminRequired, async (req, res) => {
   try {
