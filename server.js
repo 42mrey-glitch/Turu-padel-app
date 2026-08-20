@@ -944,7 +944,7 @@ function nav(req) {
       <a class="${active("/", true)}" href="/">Startseite</a>
       <a class="${active("/login", true)}" href="/login">Mitglieder-Login</a>
       <a class="${active("/register", true)}" href="/register">Registrieren</a>
-      <a class="${active("/membership")}" href="/membership">Als Mitglied anmelden</a>
+      <a class="${active("/membership")}" href="/membership">Mitgliedsantrag</a>
     </nav>`;
   }
 
@@ -1635,7 +1635,7 @@ app.get("/terms", (req, res) => {
 app.get("/membership", (req, res) => {
   res.send(page("Als Mitglied anmelden", `
     <div class="hero">
-      <h1>Als Mitglied anmelden</h1>
+      <h1>Mitgliedsantrag</h1>
       <p>Werde Mitglied bei TuRU 1880 und reiche deinen Mitgliedsantrag online ein.</p>
     </div>
 
