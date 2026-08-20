@@ -856,7 +856,7 @@ function nav(req) {
     ${req.session.member.admin
       ? `<a class="${active("/admin")}" href="/admin">Administration</a>`
       : ""}
-    <form method="post" action="/logout" onsubmit="return confirm('Benutzer wirklich sperren? Der Benutzer wird sofort abgemeldet und kann sich nicht mehr anmelden.');">
+    <form method="post" action="/logout">
       <button type="submit">Abmelden</button>
     </form>
   </nav>`;
