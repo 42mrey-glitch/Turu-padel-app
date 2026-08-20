@@ -1542,11 +1542,16 @@ app.post("/register", async (req, res) => {
       await bcrypt.hash(password, 12);
 
 
-    await pool.query(
+    const result = await pool.query(
 
-      "INSERT INTO members(name,email,password_hash,status,alias,terms_accepted_at,terms_version) VALUES($1,$2,$3,'pending',$4,NOW(),$5)",
+      "INSERT INTO members(name,email,password_hash,status,alias,terms_accepted_at,terms_version) VALUES($1,$2,$3,'pending',$4,NOW(),$5) RETURNING id",
       [name, email, hash, alias || null, TERMS_VERSION]
 
+    );
+
+    await pool.query(
+      "INSERT INTO terms_acceptances(member_id, terms_version, accepted_at) VALUES($1,$2,NOW())",
+      [result.rows[0].id, TERMS_VERSION]
     );
 
 
@@ -1617,7 +1622,12 @@ app.post("/terms/accept", async (req, res) => {
     if (!result.rowCount) return res.redirect("/login");
 
     await pool.query(
-      "INSERT INTO terms_acceptances(member_id, terms_version, accepted_at) VALUES($1,$2,NOW())",
+      `INSERT INTO terms_acceptances(member_id, terms_version, accepted_at)
+       SELECT $1, $2, NOW()
+       WHERE NOT EXISTS (
+         SELECT 1 FROM terms_acceptances
+         WHERE member_id=$1 AND terms_version=$2
+       )`,
       [result.rows[0].id, TERMS_VERSION]
     );
 
@@ -1629,7 +1639,7 @@ app.post("/terms/accept", async (req, res) => {
 });
 
 
-app.get("/admin/terms", requireAdmin, async (req, res) => {
+app.get("/admin/terms", adminRequired, async (req, res) => {
   try {
     const acceptedResult = await pool.query(`
       SELECT
