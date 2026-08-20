@@ -40,7 +40,7 @@ app.use(session({
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 1000 * 60 * 60 * 24 * 30
+    maxAge: 1000 * 60 * 30
   }
 }));
 
@@ -847,30 +847,43 @@ function nav(req) {
   </nav>`;
 }
 
-function loginRequired(req, res, next) {
-  if (!req.session.member) {
-    return res.redirect("/login");
-  }
+const INACTIVITY_TIMEOUT_MS = 1000 * 60 * 30;
 
-  next();
+async function destroyMemberSessions(memberId) {
+  await pool.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%\"id\":${Number(memberId)}%`]);
+}
+
+function touchSession(req) {
+  if (req.session) req.session.lastActivity = Date.now();
+}
+
+function loginRequired(req, res, next) {
+  if (!req.session.member) return res.redirect("/login");
+  const last = Number(req.session.lastActivity || Date.now());
+  if (Date.now() - last > INACTIVITY_TIMEOUT_MS) {
+    return req.session.destroy(() => res.redirect("/login?reason=inactive"));
+  }
+  pool.query("SELECT id,name,email,status,admin,session_version FROM members WHERE id=$1", [req.session.member.id])
+    .then(result => {
+      const member = result.rows[0];
+      if (!member || member.status !== "approved" || Number(req.session.sessionVersion || 1) !== Number(member.session_version || 1)) {
+        return req.session.destroy(() => res.redirect("/login?reason=changed"));
+      }
+      req.session.member = { id: member.id, name: member.name, email: member.email, admin: member.admin };
+      req.session.sessionVersion = Number(member.session_version || 1);
+      touchSession(req);
+      next();
+    })
+    .catch(error => { console.error(error); res.status(500).send("Serverfehler"); });
 }
 
 function adminRequired(req, res, next) {
-  if (!req.session.member?.admin) {
-    return res.status(403).send(
-      page(
-        "Kein Zugriff",
-        nav(req) +
-        '<div class="card error">' +
-        '<h2>Kein Zugriff</h2>' +
-        '<p>Dieser Bereich ist nur für Administratoren verfügbar.</p>' +
-        '</div>',
-        req
-      )
-    );
-  }
-
-  next();
+  loginRequired(req, res, () => {
+    if (!req.session.member?.admin) {
+      return res.status(403).send(page("Kein Zugriff", nav(req) + '<div class="card error"><h2>Kein Zugriff</h2><p>Dieser Bereich ist nur für Administratoren verfügbar.</p></div>', req));
+    }
+    next();
+  });
 }
 
 function slots() {
@@ -1102,9 +1115,17 @@ async function initDb() {
       password_hash TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       admin BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      alias TEXT,
+      terms_accepted_at TIMESTAMP,
+      terms_version TEXT,
+      session_version INTEGER NOT NULL DEFAULT 1
     );
   `);
+  await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS alias TEXT`);
+  await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS terms_version TEXT`);
+  await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings(
       id SERIAL PRIMARY KEY,
@@ -1268,6 +1289,17 @@ app.get("/", (req, res) => {
 });
 
 
+app.get("/terms", (req, res) => {
+  res.send(page("Nutzungsbedingungen", `
+    <div class="card"><h1>Nutzungsbedingungen – TuRU 1880 Padel</h1>
+    <p>Stand: 20.08.2026</p>
+    <h2>1. Buchungen</h2><p>Buchungen sind verbindlich. Termine dürfen nur über die App gebucht oder storniert werden.</p>
+    <h2>2. Anzeige von Buchungen</h2><p>Bei Buchungen wird der Vorname angezeigt. Optional kann ein freiwillig hinterlegter Alias angezeigt werden.</p>
+    <h2>3. Nutzung</h2><p>Die Nutzer sind für die Richtigkeit ihrer Angaben und die ordnungsgemäße Nutzung der Anlage verantwortlich. Der Administrator kann Konten bei Verstößen sperren.</p>
+    <h2>4. Änderungen</h2><p>Die Nutzungsbedingungen können aktualisiert werden. Bei wesentlichen Änderungen kann eine erneute Zustimmung erforderlich sein.</p>
+    <p><a class="btn" href="/register">Zur Registrierung</a></p></div>`, req));
+});
+
 app.get("/register", (req, res) => {
 
   res.send(
@@ -1304,13 +1336,18 @@ app.get("/register", (req, res) => {
           >
 
           <label>Passwort</label>
+          <input type="password" name="password" minlength="8" required>
 
-          <input
-            type="password"
-            name="password"
-            minlength="8"
-            required
-          >
+          <label>Passwort bestätigen</label>
+          <input type="password" name="confirm_password" minlength="8" required>
+
+          <label>Freiwilliger Alias für Buchungen</label>
+          <input name="alias" maxlength="50" placeholder="Optional – sonst wird dein Vorname angezeigt">
+
+          <label style="display:flex;align-items:flex-start;gap:8px">
+            <input type="checkbox" name="accept_terms" value="yes" style="width:auto;margin-top:4px" required>
+            <span>Ich akzeptiere die <a href="/terms" target="_blank">Nutzungsbedingungen</a>.</span>
+          </label>
 
           <div class="actions">
 
@@ -1346,11 +1383,12 @@ app.post("/register", async (req, res) => {
         .trim()
         .toLowerCase();
 
-    const password =
-      String(req.body.password || "");
+    const password = String(req.body.password || "");
+    const confirmPassword = String(req.body.confirm_password || "");
+    const alias = String(req.body.alias || "").trim();
+    const acceptTerms = req.body.accept_terms === "yes";
 
-
-    if (!name || !email || password.length < 8) {
+    if (!name || !email || password.length < 8 || password !== confirmPassword || !acceptTerms) {
 
       return res.status(400).send(
 
@@ -1361,7 +1399,7 @@ app.post("/register", async (req, res) => {
 
           '<div class="card error">' +
           '<h2>Fehler</h2>' +
-          '<p>Bitte alle Angaben ausfüllen. Passwort mindestens 8 Zeichen.</p>' +
+          '<p>Bitte alle Angaben ausfüllen, Passwort bestätigen und die Nutzungsbedingungen akzeptieren.</p>' +
           '</div>',
 
           req
@@ -1428,13 +1466,8 @@ app.post("/register", async (req, res) => {
 
     await pool.query(
 
-      "INSERT INTO members(name,email,password_hash,status) VALUES($1,$2,$3,'pending')",
-
-      [
-        name,
-        email,
-        hash
-      ]
+      "INSERT INTO members(name,email,password_hash,status,alias,terms_accepted_at,terms_version) VALUES($1,$2,$3,'pending',$4,NOW(),'2026-08-20')",
+      [name, email, hash, alias || null]
 
     );
 
@@ -1624,6 +1657,8 @@ app.post("/login", async (req, res) => {
       admin: member.admin
 
     };
+    req.session.sessionVersion = Number(member.session_version || 1);
+    req.session.lastActivity = Date.now();
 
 
     res.redirect("/");
@@ -1638,6 +1673,8 @@ app.post("/login", async (req, res) => {
   }
 });
 
+
+app.get("/logout-inactive", (req, res) => { req.session.destroy(() => res.redirect("/login?reason=inactive")); });
 
 app.post("/logout", (req, res) => {
 
@@ -1842,7 +1879,7 @@ async function getBookingsForDate(date) {
       b.start_time,
       b.end_time,
       b.member_id,
-      m.name AS member_name
+      COALESCE(NULLIF(m.alias, ''), NULLIF(split_part(m.name, ' ', 1), ''), m.name) AS member_name
     FROM bookings b
     JOIN members m ON m.id = b.member_id
     WHERE b.booking_date=$1
@@ -1971,7 +2008,7 @@ async function renderDayCalendar(date, req) {
       <div class="calendar-slot free">
         <div class="slot-time">${slot.start}–${slot.end}</div>
         <div class="slot-info"><strong>🟢 Frei</strong><small>Ein Padelplatz verfügbar</small></div>
-        <form method="post" action="/book">
+        <form method="post" action="/book" onsubmit="return confirm('Möchtest du diesen Termin wirklich verbindlich buchen?');">
           <input type="hidden" name="date" value="${esc(date)}">
           <input type="hidden" name="start" value="${esc(slot.start)}">
           <input type="hidden" name="end" value="${esc(slot.end)}">
@@ -2683,8 +2720,7 @@ app.get("/my-bookings", loginRequired, async (req, res) => {
             ? `
               <form
                 method="post"
-                action="/cancel/${booking.id}"
-              >
+                action="/cancel/${booking.id}" onsubmit="return confirm('Möchtest du diese Buchung wirklich stornieren?');">
 
                 <button
                   class="btn danger"
@@ -2995,7 +3031,7 @@ app.get("/admin", adminRequired, async (req, res) => {
         <td>${esc(booking.name)}</td>
         <td>${esc(booking.email)}</td>
         <td>
-          <form method="post" action="/admin/cancel-booking/${booking.id}">
+          <form method="post" action="/admin/cancel-booking/${booking.id}" onsubmit="return confirm('Möchtest du diese Buchung wirklich stornieren?');">
             <button class="btn danger" type="submit">Stornieren</button>
           </form>
         </td>
@@ -3510,7 +3546,7 @@ app.post("/admin/remove-admin/:id", adminRequired, async (req, res) => {
     }
 
     await pool.query(
-      "UPDATE members SET admin=FALSE WHERE id=$1",
+      "UPDATE members SET admin=FALSE, session_version=session_version+1 WHERE id=$1",
       [targetId]
     );
 
@@ -3531,7 +3567,7 @@ app.post(
 
       await pool.query(
 
-        "UPDATE members SET status='blocked' WHERE id=$1 AND admin=FALSE",
+        "UPDATE members SET status='blocked', session_version=session_version+1 WHERE id=$1 AND admin=FALSE",
 
         [
           req.params.id
