@@ -4718,6 +4718,34 @@ app.post("/admin/block/delete/:id", adminRequired, async (req, res) => {
 
 
 
+app.post("/admin/membership/:id/iban", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: "Ungültiger Mitgliedsantrag." });
+    }
+
+    const result = await pool.query(
+      "SELECT iban_full FROM membership_applications WHERE id=$1",
+      [id]
+    );
+
+    if (!result.rowCount) {
+      return res.status(404).json({ ok: false, error: "Mitgliedsantrag nicht gefunden." });
+    }
+
+    const iban = normalizeIban(result.rows[0].iban_full || "");
+    if (!iban) {
+      return res.status(404).json({ ok: false, error: "Keine IBAN hinterlegt." });
+    }
+
+    res.json({ ok: true, iban });
+  } catch (error) {
+    console.error("Fehler beim Anzeigen der IBAN:", error);
+    res.status(500).json({ ok: false, error: "IBAN konnte nicht geladen werden." });
+  }
+});
+
 app.get("/admin/membership/:id/view", adminRequired, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -4795,7 +4823,15 @@ app.get("/admin/membership/:id/view", adminRequired, async (req, res) => {
         <h2>SEPA-Lastschrift</h2>
         <table>
           <tr><th>Kontoinhaber</th><td>${esc(a.account_holder)}</td></tr>
-          <tr><th>IBAN</th><td>${esc(a.iban_masked)}</td></tr>
+          <tr><th>IBAN</th><td>
+            <span id="ibanMasked">${esc(a.iban_masked)}</span>
+            <span id="ibanFull" style="display:none;font-weight:700;letter-spacing:.4px"></span>
+            <div class="actions no-print" style="margin-top:8px">
+              <button class="btn secondary" type="button" id="showIbanBtn" onclick="showFullIban(${a.id})">👁️ IBAN anzeigen</button>
+              <button class="btn secondary" type="button" id="copyIbanBtn" onclick="copyFullIban()" style="display:none">📋 IBAN kopieren</button>
+            </div>
+            <div id="ibanError" class="muted" style="display:none;margin-top:6px"></div>
+          </td></tr>
           <tr><th>SEPA akzeptiert</th><td>${a.sepa_accepted ? "Ja" : "Nein"}</td></tr>
           <tr><th>Antrag akzeptiert</th><td>${a.application_accepted ? "Ja" : "Nein"}</td></tr>
           <tr><th>Unterschrift</th><td>${a.signature_data ? `<img src="${a.signature_data}" alt="Digitale Unterschrift" style="max-width:420px;max-height:140px;border:1px solid #ddd;background:#fff">` : "Nicht vorhanden"}</td></tr>
@@ -4807,6 +4843,61 @@ app.get("/admin/membership/:id/view", adminRequired, async (req, res) => {
           <a class="btn secondary" href="/admin">Zurück zur Administration</a>
         </div>
       </div>
+      <script>
+        let revealedIban = "";
+        async function showFullIban(id) {
+          const btn = document.getElementById("showIbanBtn");
+          const masked = document.getElementById("ibanMasked");
+          const full = document.getElementById("ibanFull");
+          const copyBtn = document.getElementById("copyIbanBtn");
+          const error = document.getElementById("ibanError");
+          btn.disabled = true;
+          error.style.display = "none";
+          try {
+            const response = await fetch("/admin/membership/" + id + "/iban", {
+              method: "POST",
+              headers: { "Accept": "application/json" }
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) throw new Error(data.error || "IBAN konnte nicht geladen werden.");
+            revealedIban = data.iban;
+            masked.style.display = "none";
+            full.textContent = data.iban;
+            full.style.display = "inline";
+            copyBtn.style.display = "inline-block";
+            btn.textContent = "🙈 IBAN ausblenden";
+            btn.disabled = false;
+            btn.onclick = hideFullIban;
+          } catch (e) {
+            error.textContent = "⚠️ " + e.message;
+            error.style.display = "block";
+            btn.disabled = false;
+          }
+        }
+        function hideFullIban() {
+          document.getElementById("ibanMasked").style.display = "inline";
+          document.getElementById("ibanFull").style.display = "none";
+          document.getElementById("copyIbanBtn").style.display = "none";
+          const btn = document.getElementById("showIbanBtn");
+          btn.textContent = "👁️ IBAN anzeigen";
+          btn.onclick = () => showFullIban(${a.id});
+          revealedIban = "";
+        }
+        async function copyFullIban() {
+          if (!revealedIban) return;
+          try {
+            await navigator.clipboard.writeText(revealedIban);
+            const btn = document.getElementById("copyIbanBtn");
+            const old = btn.textContent;
+            btn.textContent = "✅ Kopiert";
+            setTimeout(() => btn.textContent = old, 1500);
+          } catch (e) {
+            const error = document.getElementById("ibanError");
+            error.textContent = "⚠️ Kopieren ist auf diesem Gerät nicht möglich. Bitte IBAN manuell markieren.";
+            error.style.display = "block";
+          }
+        }
+      </script>
       <style>
         .membership-detail table{width:100%;border-collapse:collapse;margin-bottom:20px}
         .membership-detail th,.membership-detail td{padding:10px;border-bottom:1px solid #ddd;text-align:left}
