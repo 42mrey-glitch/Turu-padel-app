@@ -1649,6 +1649,35 @@ app.get("/", async (req, res) => {
 });
 
 
+app.get("/info", (req, res) => {
+  res.send(page("Info – Padelplätze", `
+    <div class="card">
+      <h1>ℹ️ Padelplätze & Buchungen</h1>
+
+      <h2>🎾 TuRU-Platz für Mitglieder</h2>
+      <p>
+        TuRU 1880 Düsseldorf verfügt über <b>einen eigenen Padelplatz für Mitglieder</b>.
+        TuRU-Mitglieder können auf diesem Platz die verfügbaren <b>Zeitslots direkt über die
+        TuRU-Padel-App reservieren</b>.
+      </p>
+
+      <h2>🎾 Weitere Padelplätze</h2>
+      <p>
+        Alle weiteren Padelplätze können über <b>PadelCity</b> gebucht werden.
+        Dafür ist eine separate <b>Registrierung bei PadelCity</b> erforderlich.
+      </p>
+
+      <div class="card" style="background:var(--blue-light);margin-top:18px">
+        <p><b>Kurz zusammengefasst:</b></p>
+        <p>🎾 <b>1 Platz:</b> exklusiv für TuRU-Mitglieder</p>
+        <p>📅 <b>Reservierung:</b> direkt über die TuRU-Padel-App</p>
+        <p>🎾 <b>Weitere Plätze:</b> Buchung über PadelCity</p>
+        <p>👤 <b>PadelCity:</b> separate Registrierung erforderlich</p>
+      </div>
+    </div>
+  `, req));
+});
+
 app.get("/terms", (req, res) => {
   res.send(page("Nutzungsbedingungen", `
     <div class="card">
