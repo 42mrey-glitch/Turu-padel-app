@@ -2042,7 +2042,7 @@ app.post("/membership/apply", async (req, res) => {
       [
         firstName,lastName,street,houseNumber,postalCode,city,birthDate,
         email,phone || null,plan,amountCents,interval,
-        maskIban(iban),iban,accountHolder
+        maskIban(iban),iban,accountHolder,signatureData
       ]
     );
 
@@ -2056,10 +2056,11 @@ app.post("/membership/apply", async (req, res) => {
     `, req));
   } catch (error) {
     console.error("Fehler Mitgliedsantrag:", error);
-    res.status(400).send(page("Mitgliedsantrag", `
+    res.status(500).send(page("Mitgliedsantrag", `
       <div class="card error">
-        <h2>⚠️ Antrag konnte nicht gespeichert werden</h2>
-        <p>Bitte überprüfe deine Angaben und versuche es erneut. Wenn alle Angaben korrekt sind, wende dich bitte an TuRU 1880.</p>
+        <h2>⚠️ Technischer Fehler</h2>
+        <p>Der Antrag konnte technisch gerade nicht gespeichert werden.</p>
+        <p>Bitte versuche es später erneut. Deine Eingaben wurden nicht als Antrag gespeichert.</p>
         <a class="btn" href="/membership">Zurück zum Antrag</a>
       </div>
     `, req));
