@@ -3,10 +3,21 @@ const session = require("express-session");
 const pgSession = require("connect-pg-simple")(session);
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
+const webpush = require("web-push");
 
 const app = express();
 
 const TERMS_VERSION = "2026-08-20-v2";
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "";
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:info@turu1880.de";
+const PUSH_ENABLED = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+if (PUSH_ENABLED) {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+} else {
+  console.warn("Push ist noch nicht aktiviert: VAPID_PUBLIC_KEY und VAPID_PRIVATE_KEY fehlen.");
+}
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -220,6 +231,23 @@ a:hover{
   background:var(--blue-dark);
   color:#fff;
 }
+
+.message-link{position:relative;}
+.message-badge{
+  display:none;
+  min-width:19px;
+  height:19px;
+  padding:0 5px;
+  margin-left:5px;
+  border-radius:999px;
+  background:#c0392b;
+  color:#fff;
+  font-size:11px;
+  line-height:19px;
+  text-align:center;
+  vertical-align:middle;
+}
+.message-badge.visible{display:inline-block;}
 
 main{
   max-width:1120px;
@@ -827,6 +855,77 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   });
 }
+
+const unreadBadge = document.getElementById("unreadMessageBadge");
+if (unreadBadge) {
+  fetch("/api/messages/unread-count", { credentials: "same-origin" })
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      const count = Number(data?.count || 0);
+      if (count > 0) {
+        unreadBadge.textContent = count > 99 ? "99+" : String(count);
+        unreadBadge.classList.add("visible");
+        document.title = "(" + (count > 99 ? "99+" : count) + ") Neue Nachricht" + (count === 1 ? "" : "en") + " – " + document.title;
+      }
+    })
+    .catch(() => {});
+}
+
+async function turuEnablePush() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    alert("Push-Benachrichtigungen werden von diesem Browser nicht unterstützt.");
+    return;
+  }
+  if (!window.isSecureContext) {
+    alert("Push-Benachrichtigungen benötigen eine sichere HTTPS-Verbindung.");
+    return;
+  }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      alert("Push-Benachrichtigungen wurden nicht erlaubt.");
+      return;
+    }
+    const keyResponse = await fetch("/api/push/public-key", { credentials: "same-origin" });
+    const keyData = await keyResponse.json();
+    if (!keyResponse.ok || !keyData.publicKey) {
+      alert("Push-Benachrichtigungen sind auf dem Server noch nicht eingerichtet.");
+      return;
+    }
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      const padding = "=".repeat((4 - keyData.publicKey.length % 4) % 4);
+      const base64 = (keyData.publicKey + padding).replace(/-/g, "+").replace(/_/g, "/");
+      const raw = atob(base64);
+      const bytes = new Uint8Array([...raw].map(c => c.charCodeAt(0)));
+      subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+    }
+    const save = await fetch("/api/push/subscribe", { method: "POST", credentials: "same-origin", headers: {"Content-Type":"application/json"}, body: JSON.stringify(subscription) });
+    if (!save.ok) throw new Error("Speichern fehlgeschlagen");
+    alert("Push-Benachrichtigungen sind aktiviert.");
+    location.reload();
+  } catch (error) {
+    console.error(error);
+    alert("Push-Benachrichtigungen konnten nicht aktiviert werden.");
+  }
+}
+
+async function turuDisablePush() {
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      await fetch("/api/push/unsubscribe", { method: "POST", credentials: "same-origin", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ endpoint: subscription.endpoint }) });
+      await subscription.unsubscribe();
+    }
+    alert("Push-Benachrichtigungen sind deaktiviert.");
+    location.reload();
+  } catch (error) {
+    console.error(error);
+    alert("Push-Benachrichtigungen konnten nicht deaktiviert werden.");
+  }
+}
 </script>
 <a class="terms-fixed" href="/terms" aria-label="Nutzungsbedingungen">📜 Nutzungsbedingungen</a>
 </body>
@@ -857,7 +956,8 @@ function nav(req) {
     ${req.session.member.admin
       ? `<a class="${active("/admin")}" href="/admin">Administration</a>`
       : ""}
-    <a href="/messages">💬 Nachrichten</a>
+    <a class="message-link ${active("/messages")}" href="/messages">💬 Nachrichten <span id="unreadMessageBadge" class="message-badge" aria-label="Ungelesene Nachrichten"></span></a>
+    <a class="${active("/notifications")}" href="/notifications">🔔 Benachrichtigungen</a>
       <form method="post" action="/logout">
       <button type="submit">Abmelden</button>
     </form>
@@ -1269,6 +1369,18 @@ async function initDb() {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions(
+      id SERIAL PRIMARY KEY,
+      member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL UNIQUE,
+      subscription JSONB NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_member ON push_subscriptions(member_id);`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS message_reads(
       message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
@@ -3497,6 +3609,79 @@ app.post("/cancel/:id", loginRequired, async (req, res) => {
 
 
 
+app.get("/api/push/public-key", loginRequired, (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: "Push ist noch nicht eingerichtet." });
+  res.json({ publicKey: VAPID_PUBLIC_KEY });
+});
+
+app.post("/api/push/subscribe", loginRequired, async (req, res) => {
+  try {
+    const subscription = req.body;
+    if (!subscription || !subscription.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) {
+      return res.status(400).json({ error: "Ungültige Push-Anmeldung." });
+    }
+    await pool.query(`INSERT INTO push_subscriptions(member_id,endpoint,subscription,updated_at)
+      VALUES($1,$2,$3::jsonb,NOW())
+      ON CONFLICT(endpoint) DO UPDATE SET member_id=EXCLUDED.member_id, subscription=EXCLUDED.subscription, updated_at=NOW()`,
+      [req.session.member.id, subscription.endpoint, JSON.stringify(subscription)]);
+    res.json({ ok: true });
+  } catch (error) { console.error("Push speichern:", error); res.status(500).json({ error: "Serverfehler" }); }
+});
+
+app.post("/api/push/unsubscribe", loginRequired, async (req, res) => {
+  try {
+    const endpoint = String(req.body?.endpoint || "");
+    if (endpoint) await pool.query("DELETE FROM push_subscriptions WHERE member_id=$1 AND endpoint=$2", [req.session.member.id, endpoint]);
+    res.json({ ok: true });
+  } catch (error) { console.error("Push entfernen:", error); res.status(500).json({ error: "Serverfehler" }); }
+});
+
+app.get("/notifications", loginRequired, async (req, res) => {
+  try {
+    const active = (await pool.query("SELECT 1 FROM push_subscriptions WHERE member_id=$1 LIMIT 1", [req.session.member.id])).rowCount > 0;
+    res.send(page("Benachrichtigungen", `<div class="hero"><h1>🔔 Benachrichtigungen</h1><p>Erhalte neue Nachrichten von TuRU 1880 direkt als Push-Mitteilung.</p></div>
+      <div class="card"><h2>Push-Benachrichtigungen</h2><p>${active ? "Auf diesem Konto ist mindestens ein Gerät für Push registriert." : "Push-Benachrichtigungen sind noch nicht aktiviert."}</p>
+      ${PUSH_ENABLED ? `<div class="actions"><button class="btn" type="button" onclick="turuEnablePush()">🔔 Push aktivieren</button><button class="btn secondary" type="button" onclick="turuDisablePush()">Push deaktivieren</button></div>` : `<p class="muted">Push wird vom Server noch eingerichtet.</p>`}</div>`, req));
+  } catch (error) { console.error("Benachrichtigungen:", error); res.status(500).send("Serverfehler"); }
+});
+
+async function sendPushToMembers(memberIds, title, body) {
+  if (!PUSH_ENABLED || !memberIds.length) return;
+  const result = await pool.query("SELECT id,endpoint,subscription FROM push_subscriptions WHERE member_id = ANY($1::int[])", [memberIds]);
+  await Promise.allSettled(result.rows.map(async row => {
+    try {
+      await webpush.sendNotification(row.subscription, JSON.stringify({ title, body, url: "/messages" }), { TTL: 60 * 60 * 24 });
+    } catch (error) {
+      if (error.statusCode === 404 || error.statusCode === 410) {
+        await pool.query("DELETE FROM push_subscriptions WHERE id=$1", [row.id]);
+      } else console.error("Push senden:", error.statusCode || error.message);
+    }
+  }));
+}
+
+app.get("/api/messages/unread-count", loginRequired, async (req, res) => {
+  try {
+    const member = req.session.member;
+    const result = await pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM messages m
+       LEFT JOIN message_reads mr
+         ON mr.message_id=m.id AND mr.member_id=$1
+       WHERE mr.message_id IS NULL
+         AND (
+           m.recipient_type='all'
+           OR (m.recipient_type='member' AND m.recipient_member_id=$1)
+           OR (m.recipient_type='admins' AND $2::boolean=TRUE)
+         )`,
+      [member.id, !!member.admin]
+    );
+    res.json({ count: result.rows[0]?.count || 0 });
+  } catch (error) {
+    console.error("Fehler ungelesene Nachrichten:", error);
+    res.status(500).json({ count: 0 });
+  }
+});
+
 app.get("/messages", loginRequired, async (req, res) => {
   try {
     const member = req.session.member;
@@ -3582,6 +3767,11 @@ app.post("/admin/messages/send", adminRequired, async (req, res) => {
     if(type==="member" && (!Number.isInteger(memberId)||memberId<=0)) return res.status(400).send("Bitte einen Benutzer auswählen.");
     await pool.query(`INSERT INTO messages(sender_id,title,body,recipient_type,recipient_member_id) VALUES($1,$2,$3,$4,$5)`,
       [req.session.member.id,title,body,type,memberId]);
+    let recipientRows;
+    if (type === "member") recipientRows = await pool.query("SELECT id FROM members WHERE id=$1 AND status='approved'", [memberId]);
+    else if (type === "admins") recipientRows = await pool.query("SELECT id FROM members WHERE status='approved' AND admin=TRUE");
+    else recipientRows = await pool.query("SELECT id FROM members WHERE status='approved'");
+    await sendPushToMembers(recipientRows.rows.map(r => r.id), title, body);
     res.redirect("/admin/messages");
   } catch(error) { console.error(error); res.status(500).send("Serverfehler"); }
 });
@@ -4409,6 +4599,27 @@ self.addEventListener("activate", event => {
       )
     ).then(() => self.clients.claim())
   );
+});
+
+self.addEventListener("push", event => {
+  let data = { title: "TuRU 1880 Padel", body: "Du hast eine neue Nachricht.", url: "/messages" };
+  try { if (event.data) data = { ...data, ...event.data.json() }; } catch (_) {}
+  event.waitUntil(self.registration.showNotification(data.title, {
+    body: data.body,
+    icon: "/turu-logo-v2.png",
+    badge: "/turu-logo-v2.png",
+    data: { url: data.url || "/messages" }
+  }));
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+    for (const client of list) {
+      if ("focus" in client) { client.navigate(event.notification.data.url); return client.focus(); }
+    }
+    return clients.openWindow(event.notification.data.url);
+  }));
 });
 
 // Private pages, bookings and API responses are deliberately not cached.
