@@ -845,6 +845,7 @@ function nav(req) {
       <a class="${active("/", true)}" href="/">Startseite</a>
       <a class="${active("/login", true)}" href="/login">Mitglieder-Login</a>
       <a class="${active("/register", true)}" href="/register">Registrieren</a>
+      <a class="${active("/membership")}" href="/membership">Als Mitglied anmelden</a>
     </nav>`;
   }
 
@@ -1120,6 +1121,31 @@ function formatBlockTime(block) {
   return `${String(block.start_time).slice(0, 5)}–${String(block.end_time).slice(0, 5)} Uhr`;
 }
 
+
+function normalizeIban(value = "") {
+  return String(value).replace(/\s+/g, "").toUpperCase();
+}
+
+function maskIban(value = "") {
+  const iban = normalizeIban(value);
+  if (iban.length <= 8) return iban ? "****" : "";
+  return `${iban.slice(0, 4)} **** **** ${iban.slice(-4)}`;
+}
+
+function isPlausibleIban(value = "") {
+  const iban = normalizeIban(value);
+  return /^[A-Z]{2}[0-9A-Z]{13,32}$/.test(iban);
+}
+
+function addMonthsYmd(startYmd, months) {
+  const d = dateFromYmd(startYmd);
+  if (Number.isNaN(d.getTime())) return "";
+  const day = d.getUTCDate();
+  d.setUTCMonth(d.getUTCMonth() + Number(months || 0));
+  if (d.getUTCDate() < day) d.setUTCDate(0);
+  return ymd(d);
+}
+
 async function initDb() {
 
     await pool.query(`
@@ -1186,6 +1212,49 @@ async function initDb() {
           AND a.terms_version = m.terms_version
           AND a.accepted_at = m.terms_accepted_at
       );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS membership_applications(
+      id SERIAL PRIMARY KEY,
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      street TEXT NOT NULL,
+      house_number TEXT NOT NULL,
+      postal_code TEXT NOT NULL,
+      city TEXT NOT NULL,
+      birth_date DATE NOT NULL,
+      email TEXT NOT NULL,
+      phone TEXT,
+      plan TEXT NOT NULL CHECK (plan IN ('monthly','annual')),
+      amount_cents INTEGER NOT NULL,
+      billing_interval TEXT NOT NULL CHECK (billing_interval IN ('monthly','annual')),
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','approved','rejected','cancelled')),
+      membership_start DATE,
+      minimum_end_date DATE,
+      cancellation_requested_at TIMESTAMP,
+      cancellation_effective_date DATE,
+      iban_masked TEXT NOT NULL,
+      iban_full TEXT NOT NULL,
+      account_holder TEXT NOT NULL,
+      sepa_accepted BOOLEAN NOT NULL DEFAULT FALSE,
+      sepa_accepted_at TIMESTAMP,
+      application_accepted BOOLEAN NOT NULL DEFAULT FALSE,
+      application_accepted_at TIMESTAMP,
+      notes TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      decided_at TIMESTAMP,
+      decided_by INTEGER
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_membership_applications_status
+    ON membership_applications(status, created_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_membership_applications_email
+    ON membership_applications(email);
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings(
@@ -1419,6 +1488,195 @@ app.get("/terms", (req, res) => {
         <a class="btn secondary" href="/">Zur Startseite</a>
       </div>
     </div>`, req));
+});
+
+
+app.get("/membership", (req, res) => {
+  res.send(page("Als Mitglied anmelden", `
+    <div class="hero">
+      <h1>Als Mitglied anmelden</h1>
+      <p>Werde Mitglied bei TuRU 1880 und reiche deinen Mitgliedsantrag online ein.</p>
+    </div>
+
+    <div class="card">
+      <h2>Mitgliedsantrag</h2>
+      <p class="muted">
+        Wähle zwischen 25 € monatlich oder 250 € jährlich. Die monatliche Mitgliedschaft
+        hat eine Kündigungsfrist von 1 Monat zum Monatsende. Die Jahresmitgliedschaft
+        hat eine Mindestlaufzeit von 12 Monaten; eine Kündigung kann zum Ablauf der Mindestlaufzeit
+        mit einer Frist von 1 Monat erklärt werden.
+      </p>
+
+      <form method="post" action="/membership/apply">
+        <h3>Persönliche Daten</h3>
+        <div class="grid">
+          <div><label>Vorname</label><input type="text" name="first_name" maxlength="100" required></div>
+          <div><label>Nachname</label><input type="text" name="last_name" maxlength="100" required></div>
+          <div><label>Straße</label><input type="text" name="street" maxlength="120" required></div>
+          <div><label>Hausnummer</label><input type="text" name="house_number" maxlength="20" required></div>
+          <div><label>PLZ</label><input type="text" name="postal_code" maxlength="12" required></div>
+          <div><label>Ort</label><input type="text" name="city" maxlength="100" required></div>
+          <div><label>Geburtsdatum</label><input type="date" name="birth_date" required></div>
+          <div><label>Telefon</label><input type="tel" name="phone" maxlength="50"></div>
+          <div><label>E-Mail</label><input type="email" name="email" maxlength="200" required></div>
+        </div>
+
+        <h3>Mitgliedschaft</h3>
+        <div class="grid">
+          <label class="card" style="margin:0">
+            <input type="radio" name="plan" value="monthly" checked style="width:auto">
+            <b>Monatlich – 25 €</b><br>
+            <span class="muted">Kündigungsfrist: 1 Monat zum Monatsende.</span>
+          </label>
+          <label class="card" style="margin:0">
+            <input type="radio" name="plan" value="annual" style="width:auto">
+            <b>Jährlich – 250 €</b><br>
+            <span class="muted">Mindestlaufzeit: 1 Jahr. Kündigung mit 1 Monat Frist zum Ablauf der Mindestlaufzeit.</span>
+          </label>
+        </div>
+
+        <h3>SEPA-Lastschrift</h3>
+        <p class="muted">Die Belastung erfolgt erst nach Annahme des Mitgliedsantrags und nach Maßgabe eurer SEPA-Informationen.</p>
+        <div class="grid">
+          <div><label>Kontoinhaber</label><input type="text" name="account_holder" maxlength="150" required></div>
+          <div><label>IBAN</label><input type="text" name="iban" autocomplete="off" maxlength="40" required></div>
+        </div>
+
+        <label style="display:flex;gap:10px;align-items:flex-start;margin-top:16px">
+          <input type="checkbox" name="sepa_accepted" value="1" required style="width:auto;margin-top:4px">
+          <span>Ich ermächtige TuRU 1880, die fälligen Mitgliedsbeiträge per SEPA-Lastschrift von meinem angegebenen Konto einzuziehen. Die genaue Gläubiger-ID und Mandatsreferenz werden mir separat bzw. mit der Bestätigung des Mitgliedsantrags mitgeteilt.</span>
+        </label>
+
+        <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px">
+          <input type="checkbox" name="application_accepted" value="1" required style="width:auto;margin-top:4px">
+          <span>Ich bestätige die Angaben und beantrage die gewählte Mitgliedschaft zu den oben beschriebenen Konditionen.</span>
+        </label>
+
+        <div class="actions">
+          <button class="btn" type="submit">Mitgliedsantrag absenden</button>
+        </div>
+      </form>
+    </div>
+  `, req));
+});
+
+app.post("/membership/apply", async (req, res) => {
+  try {
+    const firstName = String(req.body.first_name || "").trim();
+    const lastName = String(req.body.last_name || "").trim();
+    const street = String(req.body.street || "").trim();
+    const houseNumber = String(req.body.house_number || "").trim();
+    const postalCode = String(req.body.postal_code || "").trim();
+    const city = String(req.body.city || "").trim();
+    const birthDate = normalizeYmd(req.body.birth_date);
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const phone = String(req.body.phone || "").trim();
+    const plan = String(req.body.plan || "");
+    const accountHolder = String(req.body.account_holder || "").trim();
+    const iban = normalizeIban(req.body.iban || "");
+    const sepaAccepted = req.body.sepa_accepted === "1";
+    const applicationAccepted = req.body.application_accepted === "1";
+
+    if (!firstName || !lastName || !street || !houseNumber || !postalCode || !city ||
+        !birthDate || !email || !["monthly", "annual"].includes(plan) ||
+        !accountHolder || !isPlausibleIban(iban) || !sepaAccepted || !applicationAccepted) {
+      return res.status(400).send(page("Mitgliedsantrag", `
+        <div class="card error">
+          <h2>Antrag unvollständig</h2>
+          <p>Bitte fülle alle Pflichtfelder korrekt aus und bestätige beide Erklärungen.</p>
+          <a class="btn" href="/membership">Zurück zum Antrag</a>
+        </div>
+      `, req));
+    }
+
+    const duplicate = await pool.query(
+      `SELECT id FROM membership_applications
+       WHERE email=$1 AND status IN ('pending','approved')
+       LIMIT 1`,
+      [email]
+    );
+    if (duplicate.rowCount) {
+      return res.status(409).send(page("Mitgliedsantrag", `
+        <div class="card warn">
+          <h2>Antrag bereits vorhanden</h2>
+          <p>Für diese E-Mail-Adresse gibt es bereits einen offenen oder angenommenen Mitgliedsantrag.</p>
+          <a class="btn" href="/membership">Zurück</a>
+        </div>
+      `, req));
+    }
+
+    const amountCents = plan === "monthly" ? 2500 : 25000;
+    const interval = plan === "monthly" ? "monthly" : "annual";
+
+    await pool.query(
+      `INSERT INTO membership_applications(
+        first_name,last_name,street,house_number,postal_code,city,birth_date,
+        email,phone,plan,amount_cents,billing_interval,
+        iban_masked,iban_full,account_holder,
+        sepa_accepted,sepa_accepted_at,application_accepted,application_accepted_at
+      ) VALUES(
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,TRUE,NOW(),TRUE,NOW()
+      )`,
+      [
+        firstName,lastName,street,houseNumber,postalCode,city,birthDate,
+        email,phone || null,plan,amountCents,interval,
+        maskIban(iban),iban,accountHolder
+      ]
+    );
+
+    res.send(page("Mitgliedsantrag eingegangen", `
+      <div class="card ok">
+        <h2>✓ Mitgliedsantrag erfolgreich übermittelt</h2>
+        <p>Vielen Dank, ${esc(firstName)}. Dein Antrag wurde gespeichert und wird von TuRU 1880 geprüft.</p>
+        <p>Die Mitgliedschaft wird erst nach Annahme durch den Verein wirksam. Informationen zur weiteren SEPA-Abwicklung erhältst du mit der Bestätigung.</p>
+        <div class="actions"><a class="btn" href="/">Zur Startseite</a></div>
+      </div>
+    `, req));
+  } catch (error) {
+    console.error("Fehler Mitgliedsantrag:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
+app.post("/membership/cancel/:id", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = await pool.query(
+      `SELECT id,status,plan,membership_start,minimum_end_date
+       FROM membership_applications WHERE id=$1`,
+      [id]
+    );
+    if (!result.rowCount) return res.redirect("/admin");
+    const application = result.rows[0];
+
+    if (application.status !== "approved") return res.redirect("/admin");
+
+    const today = berlinDate();
+    let effectiveDate;
+
+    if (application.plan === "annual") {
+      const minEnd = normalizeYmd(application.minimum_end_date);
+      effectiveDate = minEnd || addMonthsYmd(today, 12);
+    } else {
+      const d = dateFromYmd(today);
+      d.setUTCMonth(d.getUTCMonth() + 2, 0);
+      effectiveDate = ymd(d);
+    }
+
+    await pool.query(
+      `UPDATE membership_applications
+       SET status='cancelled',
+           cancellation_requested_at=NOW(),
+           cancellation_effective_date=$2,
+           updated_at=NOW()
+       WHERE id=$1`,
+      [id, effectiveDate]
+    );
+    res.redirect("/admin");
+  } catch (error) {
+    console.error("Fehler Kündigung:", error);
+    res.status(500).send("Serverfehler");
+  }
 });
 
 app.get("/register", (req, res) => {
@@ -3219,7 +3477,7 @@ app.post("/cancel/:id", loginRequired, async (req, res) => {
 
 app.get("/admin", adminRequired, async (req, res) => {
   try {
-    const [membersResult, bookingsResult, blocksResult, statsResult] =
+    const [membersResult, bookingsResult, blocksResult, membershipResult, statsResult] =
       await Promise.all([
         pool.query(`
           SELECT id, name, email, status, admin, created_at
@@ -3237,6 +3495,17 @@ app.get("/admin", adminRequired, async (req, res) => {
           FROM booking_blocks
           WHERE active=TRUE
           ORDER BY start_date, start_time, id
+        `),
+        pool.query(`
+          SELECT
+            id, first_name, last_name, street, house_number, postal_code, city,
+            birth_date, email, phone, plan, amount_cents, billing_interval, status,
+            membership_start, minimum_end_date, cancellation_effective_date,
+            iban_masked, account_holder, created_at
+          FROM membership_applications
+          ORDER BY
+            CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
+            created_at DESC
         `),
         pool.query(`
           SELECT
@@ -3341,6 +3610,43 @@ app.get("/admin", adminRequired, async (req, res) => {
       </tr>
     `).join("");
 
+
+    const membershipRows = membershipResult.rows.map(application => {
+      const planLabel = application.plan === "annual" ? "Jährlich – 250 €" : "Monatlich – 25 €";
+      const statusLabels = {
+        pending: '<span class="badge warn">Beantragt</span>',
+        approved: '<span class="badge ok">Angenommen</span>',
+        rejected: '<span class="badge error">Abgelehnt</span>',
+        cancelled: '<span class="badge">Gekündigt</span>'
+      };
+      let actions = "";
+      if (application.status === "pending") {
+        actions = `
+          <form method="post" action="/admin/membership/${application.id}/approve" style="display:inline" onsubmit="return confirm('Mitgliedsantrag wirklich annehmen?');">
+            <button class="btn" type="submit">Annehmen</button>
+          </form>
+          <form method="post" action="/admin/membership/${application.id}/reject" style="display:inline" onsubmit="return confirm('Mitgliedsantrag wirklich ablehnen?');">
+            <button class="btn danger" type="submit">Ablehnen</button>
+          </form>`;
+      } else if (application.status === "approved") {
+        actions = `
+          <form method="post" action="/membership/cancel/${application.id}" style="display:inline" onsubmit="return confirm('Mitgliedschaft wirklich kündigen? Das Wirksamkeitsdatum wird nach dem gewählten Tarif berechnet.');">
+            <button class="btn danger" type="submit">Kündigen</button>
+          </form>`;
+      }
+      return `
+        <tr>
+          <td><b>${esc(application.first_name)} ${esc(application.last_name)}</b><br><span class="muted">${esc(application.email)} · ${esc(application.phone || "–")}</span></td>
+          <td>${esc(application.street)} ${esc(application.house_number)}<br>${esc(application.postal_code)} ${esc(application.city)}</td>
+          <td>${esc(planLabel)}</td>
+          <td>${statusLabels[application.status] || esc(application.status)}</td>
+          <td>${application.membership_start ? esc(normalizeYmd(application.membership_start)) : "–"}<br><span class="muted">Mindestende: ${application.minimum_end_date ? esc(normalizeYmd(application.minimum_end_date)) : "–"}</span></td>
+          <td>${esc(application.account_holder)}<br><span class="muted">${esc(application.iban_masked)}</span></td>
+          <td>${esc(normalizeYmd(application.created_at))}</td>
+          <td>${actions || "–"}</td>
+        </tr>`;
+    }).join("");
+
     const blockRows = blocksResult.rows.length
       ? blocksResult.rows.map(block => `
         <tr>
@@ -3437,6 +3743,18 @@ app.get("/admin", adminRequired, async (req, res) => {
             <th>Datum</th><th>Zeit</th><th>Wiederholung</th><th>Grund</th><th>Aktion</th>
           </tr></thead>
           <tbody>${blockRows}</tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>📝 Mitgliedsanträge</h2>
+        <p class="muted">Online eingereichte Vereinsmitgliedschaften und deren Bearbeitungsstatus.</p>
+        <table>
+          <thead><tr>
+            <th>Antragsteller</th><th>Adresse</th><th>Tarif</th><th>Status</th>
+            <th>Laufzeit</th><th>SEPA-Konto</th><th>Antrag</th><th>Aktion</th>
+          </tr></thead>
+          <tbody>${membershipRows || '<tr><td colspan="8" class="muted">Noch keine Mitgliedsanträge.</td></tr>'}</tbody>
         </table>
       </div>
 
@@ -3606,6 +3924,53 @@ app.post("/admin/block/delete/:id", adminRequired, async (req, res) => {
 });
 
 
+
+
+app.post("/admin/membership/:id/approve", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const found = await pool.query(
+      "SELECT id,status,plan FROM membership_applications WHERE id=$1 FOR UPDATE",
+      [id]
+    );
+    if (!found.rowCount || found.rows[0].status !== "pending") return res.redirect("/admin");
+
+    const start = berlinDate();
+    const minimumEnd = found.rows[0].plan === "annual" ? addMonthsYmd(start, 12) : null;
+
+    await pool.query(
+      `UPDATE membership_applications
+       SET status='approved',
+           membership_start=$2,
+           minimum_end_date=$3,
+           decided_at=NOW(),
+           decided_by=$4,
+           updated_at=NOW()
+       WHERE id=$1`,
+      [id, start, minimumEnd, Number(req.session.member.id)]
+    );
+    res.redirect("/admin");
+  } catch (error) {
+    console.error("Fehler Mitgliedsantrag annehmen:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
+app.post("/admin/membership/:id/reject", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await pool.query(
+      `UPDATE membership_applications
+       SET status='rejected', decided_at=NOW(), decided_by=$2, updated_at=NOW()
+       WHERE id=$1 AND status='pending'`,
+      [id, Number(req.session.member.id)]
+    );
+    res.redirect("/admin");
+  } catch (error) {
+    console.error("Fehler Mitgliedsantrag ablehnen:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
 
 app.post("/admin/create-member", adminRequired, async (req, res) => {
   try {
