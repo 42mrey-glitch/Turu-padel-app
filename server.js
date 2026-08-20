@@ -3736,7 +3736,14 @@ app.get("/admin/messages", adminRequired, async (req, res) => {
       <td><b>${esc(m.title)}</b><br><span class="muted">${esc(String(m.created_at))}</span></td>
       <td>${m.recipient_type==='all'?'Alle Nutzer':m.recipient_type==='admins'?'Administratoren':'Einzelner Nutzer'}</td>
       <td>${m.read_count}</td>
-      <td><a class="btn" href="/admin/messages/${m.id}/reads">Lesestatus</a></td></tr>`).join("");
+      <td>
+        <div class="actions">
+          <a class="btn" href="/admin/messages/${m.id}/reads">Lesestatus</a>
+          <form method="post" action="/admin/messages/${m.id}/delete" style="display:inline" onsubmit="return confirm('Nachricht wirklich endgültig löschen?');">
+            <button class="btn" type="submit">🗑️ Löschen</button>
+          </form>
+        </div>
+      </td></tr>`).join("");
     res.send(page("Kommunikation", `
       <div class="hero"><h1>📣 Kommunikations-Zentrale</h1><p>Nachrichten senden und Lesestatus prüfen.</p></div>
       <div class="card"><h2>Neue Nachricht</h2>
@@ -3774,6 +3781,29 @@ app.post("/admin/messages/send", adminRequired, async (req, res) => {
     await sendPushToMembers(recipientRows.rows.map(r => r.id), title, body);
     res.redirect("/admin/messages");
   } catch(error) { console.error(error); res.status(500).send("Serverfehler"); }
+});
+
+app.post("/admin/messages/:id/delete", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).send("Ungültige Nachricht.");
+    }
+
+    const result = await pool.query(
+      "DELETE FROM messages WHERE id=$1 RETURNING id",
+      [id]
+    );
+
+    if (!result.rowCount) {
+      return res.status(404).send("Nachricht nicht gefunden.");
+    }
+
+    res.redirect("/admin/messages");
+  } catch (error) {
+    console.error("Fehler Nachricht löschen:", error);
+    res.status(500).send("Serverfehler");
+  }
 });
 
 app.get("/admin/messages/:id/reads", adminRequired, async (req,res)=>{
