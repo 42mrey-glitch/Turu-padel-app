@@ -1951,13 +1951,30 @@ app.post("/membership/apply", async (req, res) => {
       `, req));
     }
 
-    if (!firstName || !lastName || !street || !houseNumber || !postalCode || !city ||
-        !birthDate || !email || !["monthly", "annual"].includes(plan) ||
-        !accountHolder || !sepaAccepted || !applicationAccepted || !isValidSignature(signatureData)) {
+    const validationErrors = [];
+    if (!firstName) validationErrors.push("Vorname fehlt.");
+    if (!lastName) validationErrors.push("Nachname fehlt.");
+    if (!street) validationErrors.push("Straße fehlt.");
+    if (!houseNumber) validationErrors.push("Hausnummer fehlt.");
+    if (!postalCode) validationErrors.push("PLZ fehlt.");
+    if (!city) validationErrors.push("Ort fehlt.");
+    if (!birthDate) validationErrors.push("Geburtsdatum fehlt oder ist ungültig.");
+    if (!email) validationErrors.push("E-Mail-Adresse fehlt.");
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) validationErrors.push("E-Mail-Adresse ist ungültig.");
+    if (!["monthly", "annual"].includes(plan)) validationErrors.push("Bitte wähle eine Mitgliedschaft aus.");
+    if (!accountHolder) validationErrors.push("Kontoinhaber fehlt.");
+    if (!sepaAccepted) validationErrors.push("Die SEPA-Ermächtigung muss bestätigt werden.");
+    if (!applicationAccepted) validationErrors.push("Die Bestätigung des Mitgliedsantrags muss akzeptiert werden.");
+    if (!isValidSignature(signatureData)) validationErrors.push("Die Unterschrift fehlt oder ist ungültig.");
+
+    if (validationErrors.length) {
       return res.status(400).send(page("Mitgliedsantrag", `
         <div class="card error">
-          <h2>Antrag unvollständig</h2>
-          <p>Bitte fülle alle Pflichtfelder korrekt aus, bestätige beide Erklärungen und unterschreibe den Antrag.</p>
+          <h2>⚠️ Bitte Angaben prüfen</h2>
+          <p>Folgende Angaben sind noch nicht korrekt:</p>
+          <ul style="margin:12px 0 18px;padding-left:22px">
+            ${validationErrors.map(error => `<li style="margin:7px 0">${esc(error)}</li>`).join("")}
+          </ul>
           <a class="btn" href="/membership">Zurück zum Antrag</a>
         </div>
       `, req));
