@@ -1950,17 +1950,36 @@ app.post("/membership/apply", async (req, res) => {
     }
 
     const duplicate = await pool.query(
-      `SELECT id FROM membership_applications
-       WHERE email=$1 AND status IN ('pending','approved')
+      `SELECT id, first_name, last_name, email, status
+       FROM membership_applications
+       WHERE lower(trim(email)) = lower(trim($1))
+          OR (lower(trim(first_name)) = lower(trim($2))
+              AND lower(trim(last_name)) = lower(trim($3)))
+       ORDER BY created_at DESC
        LIMIT 1`,
-      [email]
+      [email, firstName, lastName]
     );
     if (duplicate.rowCount) {
+      const existing = duplicate.rows[0];
+      const sameEmail = String(existing.email || '').trim().toLowerCase() === email;
+      const sameName = String(existing.first_name || '').trim().toLowerCase() === firstName.toLowerCase()
+        && String(existing.last_name || '').trim().toLowerCase() === lastName.toLowerCase();
+
+      let reason = '';
+      if (sameEmail && sameName) {
+        reason = 'Für diese E-Mail-Adresse und diesen Namen wurde bereits ein Mitgliedsantrag eingereicht.';
+      } else if (sameEmail) {
+        reason = 'Für diese E-Mail-Adresse wurde bereits ein Mitgliedsantrag eingereicht.';
+      } else {
+        reason = 'Für diesen Vor- und Nachnamen wurde bereits ein Mitgliedsantrag eingereicht.';
+      }
+
       return res.status(409).send(page("Mitgliedsantrag", `
         <div class="card warn">
-          <h2>Antrag bereits vorhanden</h2>
-          <p>Für diese E-Mail-Adresse gibt es bereits einen offenen oder angenommenen Mitgliedsantrag.</p>
-          <a class="btn" href="/membership">Zurück</a>
+          <h2>⚠️ Antrag bereits vorhanden</h2>
+          <p>${esc(reason)}</p>
+          <p>Bitte prüfe deine Angaben. Ein zweiter Antrag mit derselben E-Mail-Adresse oder demselben Namen ist nicht möglich.</p>
+          <a class="btn" href="/membership">Zurück zum Antrag</a>
         </div>
       `, req));
     }
@@ -4347,6 +4366,11 @@ app.get("/admin", adminRequired, async (req, res) => {
             <button class="btn danger" type="submit">Kündigen</button>
           </form>`;
       }
+
+      actions += `
+        <form method="post" action="/admin/membership/${application.id}/delete" style="display:inline" onsubmit="return confirm('Mitgliedsantrag wirklich endgültig löschen? Diese Aktion kann nicht rückgängig gemacht werden.');">
+          <button class="btn danger" type="submit">🗑️ Löschen</button>
+        </form>`;
       return `
         <tr>
           <td><b>${esc(application.first_name)} ${esc(application.last_name)}</b><br><span class="muted">${esc(application.email)} · ${esc(application.phone || "–")}</span></td>
@@ -4796,6 +4820,32 @@ app.post("/admin/membership/:id/reject", adminRequired, async (req, res) => {
     res.status(500).send("Serverfehler");
   }
 });
+
+app.post("/admin/membership/:id/delete", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).send("Ungültiger Mitgliedsantrag.");
+    }
+
+    const result = await pool.query(
+      `DELETE FROM membership_applications
+       WHERE id=$1
+       RETURNING id`,
+      [id]
+    );
+
+    if (!result.rowCount) {
+      return res.status(404).send("Mitgliedsantrag nicht gefunden.");
+    }
+
+    res.redirect("/admin");
+  } catch (error) {
+    console.error("Fehler beim Löschen des Mitgliedsantrags:", error);
+    res.status(500).send("Mitgliedsantrag konnte nicht gelöscht werden.");
+  }
+});
+
 
 app.post("/admin/create-member", adminRequired, async (req, res) => {
   try {
