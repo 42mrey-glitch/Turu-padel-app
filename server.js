@@ -1572,6 +1572,18 @@ app.get("/", async (req, res) => {
           hier kannst du deinen Padelplatz einfach und schnell buchen.
         </p>
 
+        <div class="card" style="margin:18px 0">
+          <h2>🎾 Platzreservierung</h2>
+          <p>
+            <b>TuRU 1880 Düsseldorf verfügt über einen eigenen Padelplatz für Mitglieder.</b>
+            Dieser Platz kann direkt über die TuRU-Padel-App reserviert werden.
+          </p>
+          <p>
+            <b>Alle weiteren Padelplätze können über PadelCity gebucht werden.</b>
+            Dafür ist eine separate Registrierung bei PadelCity erforderlich.
+          </p>
+        </div>
+
         <div class="actions">
 
           ${req.session.member.hasActiveBooking
@@ -1608,10 +1620,24 @@ app.get("/", async (req, res) => {
           von TuRU 1880 Düsseldorf.
         </p>
 
-        <p>
-          Padelplätze können ausschließlich von
-          freigeschalteten Mitgliedern gebucht werden.
-        </p>
+        <div class="card" style="margin:18px 0">
+          <h2>🎾 Platzreservierung</h2>
+          <p>
+            <b>TuRU 1880 Düsseldorf verfügt über einen eigenen Padelplatz für Mitglieder.</b>
+            TuRU-Mitglieder können auf diesem Platz die verfügbaren Zeitslots direkt über
+            die TuRU-Padel-App reservieren.
+          </p>
+
+          <p>
+            <b>Alle weiteren Padelplätze können über PadelCity gebucht werden.</b>
+            Dafür ist eine separate Registrierung bei PadelCity erforderlich.
+          </p>
+
+          <p class="muted">
+            🎾 1 Platz exklusiv für TuRU-Mitglieder · 📅 Reservierung direkt über die TuRU-Padel-App ·
+            🎾 Weitere Plätze über PadelCity
+          </p>
+        </div>
 
         <div class="actions">
 
