@@ -248,6 +248,7 @@ a:hover{
   vertical-align:middle;
 }
 .message-badge.visible{display:inline-block;}
+.nav-disabled{opacity:.55;cursor:not-allowed;padding:10px 12px;display:inline-flex;align-items:center;}
 
 main{
   max-width:1120px;
@@ -950,7 +951,9 @@ function nav(req) {
 
   return `<nav class="nav">
     <a class="${active("/", true)}" href="/">Startseite</a>
-    <a class="${active("/booking")}" href="/booking">Platz buchen</a>
+    ${req.session.member.admin || !req.session.member.hasActiveBooking
+      ? `<a class="${active("/booking")}" href="/booking">🎾 Platz buchen</a>`
+      : `<span class="nav-disabled" title="Du hast bereits eine aktive Buchung">🎾 Platz buchen (bereits gebucht)</span>`}
     <a class="${active("/my-bookings")}" href="/my-bookings">Meine Buchungen</a>
     <a class="${active("/password")}" href="/password">Passwort ändern</a>
     ${req.session.member.admin
@@ -1030,6 +1033,25 @@ function normalizeYmd(value) {
   const raw = String(value || "").trim();
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? match[0] : "";
+}
+
+function isAdultBirthDate(value) {
+  const birth = dateFromYmd(value);
+  const today = dateFromYmd(berlinDate());
+  if (Number.isNaN(birth.getTime()) || Number.isNaN(today.getTime())) return false;
+  if (birth > today) return false;
+  let age = today.getUTCFullYear() - birth.getUTCFullYear();
+  const birthdayPassed =
+    today.getUTCMonth() > birth.getUTCMonth() ||
+    (today.getUTCMonth() === birth.getUTCMonth() && today.getUTCDate() >= birth.getUTCDate());
+  if (!birthdayPassed) age--;
+  return age >= 18;
+}
+
+function adultCutoffYmd() {
+  const today = dateFromYmd(berlinDate());
+  today.setUTCFullYear(today.getUTCFullYear() - 18);
+  return ymd(today);
 }
 
 function dateFromYmd(value) {
@@ -1265,6 +1287,7 @@ async function initDb() {
     );
   `);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS alias TEXT`);
+  await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS birth_date DATE`);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP`);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS terms_version TEXT`);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1`);
@@ -1491,7 +1514,22 @@ async function logMemberChange({ member, action, oldStatus, newStatus, oldAdmin,
 
 
 
-app.get("/", (req, res) => {
+app.get("/", async (req, res) => {
+
+  if (req.session.member) {
+    try {
+      const active = await pool.query(
+        `SELECT id FROM bookings
+         WHERE member_id=$1 AND used=FALSE
+           AND (booking_date + end_time) > NOW()
+         LIMIT 1`,
+        [req.session.member.id]
+      );
+      req.session.member.hasActiveBooking = active.rowCount > 0;
+    } catch (error) {
+      console.error("Fehler Buchungsstatus Startseite:", error);
+    }
+  }
 
   const content = req.session.member
 
@@ -1507,9 +1545,9 @@ app.get("/", (req, res) => {
 
         <div class="actions">
 
-          <a class="btn" href="/booking">
-            🎾 Platz buchen
-          </a>
+          ${req.session.member.hasActiveBooking
+            ? `<span class="nav-disabled">🎾 Platz buchen (bereits gebucht)</span>`
+            : `<a class="btn" href="/booking">🎾 Platz buchen</a>`}
 
           <a class="btn secondary" href="/my-bookings">
             Meine Buchungen
@@ -1657,7 +1695,13 @@ app.get("/membership", (req, res) => {
           <div><label>Hausnummer</label><input type="text" name="house_number" maxlength="20" required></div>
           <div><label>PLZ</label><input type="text" name="postal_code" maxlength="12" required></div>
           <div><label>Ort</label><input type="text" name="city" maxlength="100" required></div>
-          <div><label>Geburtsdatum</label><input type="date" name="birth_date" required></div>
+          <div>
+            <label>Geburtsdatum</label>
+            <input id="membershipBirthDate" type="date" name="birth_date" required max="${adultCutoffYmd()}">
+            <div id="minorWarning" class="alert" style="display:none;margin-top:8px">
+              ⚠️ Minderjährige können keinen Mitgliedsantrag abschließen. Der Antrag ist erst ab 18 Jahren möglich.
+            </div>
+          </div>
           <div><label>Telefon</label><input type="tel" name="phone" maxlength="50"></div>
           <div><label>E-Mail</label><input type="email" name="email" maxlength="200" required></div>
         </div>
@@ -1694,9 +1738,25 @@ app.get("/membership", (req, res) => {
         </label>
 
         <div class="actions">
-          <button class="btn" type="submit">Mitgliedsantrag absenden</button>
+          <button id="membershipSubmit" class="btn" type="submit">Mitgliedsantrag absenden</button>
         </div>
       </form>
+      <script>
+        (() => {
+          const input = document.getElementById("membershipBirthDate");
+          const warning = document.getElementById("minorWarning");
+          const button = document.getElementById("membershipSubmit");
+          const cutoff = "${adultCutoffYmd()}";
+          function checkAge() {
+            const minor = !input.value || input.value > cutoff;
+            warning.style.display = input.value && minor ? "block" : "none";
+            button.disabled = !!(input.value && minor);
+          }
+          input.addEventListener("change", checkAge);
+          input.addEventListener("input", checkAge);
+          checkAge();
+        })();
+      </script>
     </div>
   `, req));
 });
@@ -1726,6 +1786,16 @@ app.post("/membership/apply", async (req, res) => {
           <h2>Antrag unvollständig</h2>
           <p>Bitte fülle alle Pflichtfelder korrekt aus und bestätige beide Erklärungen.</p>
           <a class="btn" href="/membership">Zurück zum Antrag</a>
+        </div>
+      `, req));
+    }
+
+    if (!isAdultBirthDate(birthDate)) {
+      return res.status(400).send(page("Mitgliedsantrag", `
+        <div class="card error">
+          <h2>Mitgliedsantrag nicht möglich</h2>
+          <p>⚠️ Minderjährige können keinen Mitgliedsantrag abschließen. Eine Mitgliedschaft kann erst ab 18 Jahren beantragt werden.</p>
+          <a class="btn secondary" href="/membership">Zurück zum Antrag</a>
         </div>
       `, req));
     }
@@ -1855,6 +1925,15 @@ app.get("/register", (req, res) => {
             required
           >
 
+          <label>Geburtsdatum</label>
+          <input
+            type="date"
+            name="birth_date"
+            required
+            max="${adultCutoffYmd()}"
+          >
+          <p class="muted">Die Registrierung ist nur ab 18 Jahren möglich.</p>
+
           <label>Passwort</label>
           <input type="password" name="password" minlength="8" required>
 
@@ -1905,26 +1984,33 @@ app.post("/register", async (req, res) => {
 
     const password = String(req.body.password || "");
     const confirmPassword = String(req.body.confirm_password || "");
+    const birthDate = normalizeYmd(req.body.birth_date);
     const alias = String(req.body.alias || "").trim();
     const acceptTerms = req.body.accept_terms === "yes";
 
-    if (!name || !email || password.length < 8 || password !== confirmPassword || !acceptTerms) {
+    let registrationError = "";
+    if (!name || !email || !birthDate || !password || !confirmPassword) {
+      registrationError = "Bitte fülle alle Pflichtfelder aus.";
+    } else if (password.length < 8) {
+      registrationError = "Das Passwort muss mindestens 8 Zeichen lang sein.";
+    } else if (password !== confirmPassword) {
+      registrationError = "Die Passwörter stimmen nicht überein.";
+    } else if (!isAdultBirthDate(birthDate)) {
+      registrationError = "Du bist minderjährig. Ein Mitgliedsantrag kann erst ab 18 Jahren abgeschlossen werden.";
+    } else if (!acceptTerms) {
+      registrationError = "Bitte akzeptiere die Nutzungsbedingungen.";
+    }
 
-      return res.status(400).send(
-
-        page(
-          "Fehler",
-
-          nav(req) +
-
-          '<div class="card error">' +
-          '<h2>Fehler</h2>' +
-          '<p>Bitte alle Angaben ausfüllen, Passwort bestätigen und die Nutzungsbedingungen akzeptieren.</p>' +
-          '</div>',
-
-          req
-        )
-      );
+    if (registrationError) {
+      return res.status(400).send(page(
+        "Registrierung",
+        `<div class="card error">
+          <h2>Registrierung nicht möglich</h2>
+          <p>${esc(registrationError)}</p>
+          <div class="actions"><a class="btn secondary" href="/register">Zurück zur Registrierung</a></div>
+        </div>`,
+        req
+      ));
     }
 
 
@@ -1986,8 +2072,8 @@ app.post("/register", async (req, res) => {
 
     const result = await pool.query(
 
-      "INSERT INTO members(name,email,password_hash,status,alias,terms_accepted_at,terms_version) VALUES($1,$2,$3,'pending',$4,NOW(),$5) RETURNING id",
-      [name, email, hash, alias || null, TERMS_VERSION]
+      "INSERT INTO members(name,email,password_hash,status,alias,birth_date,terms_accepted_at,terms_version) VALUES($1,$2,$3,'pending',$4,$5,NOW(),$6) RETURNING id",
+      [name, email, hash, alias || null, birthDate, TERMS_VERSION]
 
     );
 
@@ -2338,9 +2424,20 @@ app.post("/login", async (req, res) => {
 
       email: member.email,
 
-      admin: member.admin
-
+      admin: member.admin,
+      hasActiveBooking: false
     };
+
+    const loginBooking = await pool.query(
+      `SELECT id FROM bookings
+       WHERE member_id=$1
+         AND used=FALSE
+         AND (booking_date + end_time) > NOW()
+       LIMIT 1`,
+      [member.id]
+    );
+    req.session.member.hasActiveBooking = loginBooking.rowCount > 0;
+
     req.session.sessionVersion = Number(member.session_version || 1);
     req.session.lastActivity = Date.now();
 
@@ -2810,6 +2907,18 @@ async function renderMonthCalendar(date, req) {
 
 app.get("/booking", loginRequired, async (req, res) => {
   try {
+    if (!req.session.member.admin && req.session.member.hasActiveBooking) {
+      return res.send(page("Platz buchen", `
+        <div class="card warn">
+          <h2>🎾 Du hast bereits eine aktive Buchung</h2>
+          <p>Solange diese Buchung aktiv ist, kannst du keine weitere Buchung vornehmen.</p>
+          <div class="actions">
+            <a class="btn secondary" href="/my-bookings">Meine Buchungen</a>
+          </div>
+        </div>
+      `, req));
+    }
+
     const view = ["day", "week", "month"].includes(String(req.query.view || ""))
       ? String(req.query.view)
       : "day";
@@ -3230,12 +3339,9 @@ app.post("/book", loginRequired, async (req, res) => {
               Meine Buchungen
             </a>
 
-            <a
-              class="btn secondary"
-              href="/booking"
-            >
-              Weitere Zeiten
-            </a>
+            ${req.session.member.admin
+              ? `<a class="btn secondary" href="/booking">Weitere Zeiten</a>`
+              : `<span class="nav-disabled">Weitere Buchung erst nach Ablauf</span>`}
 
           </div>
 
@@ -3675,7 +3781,10 @@ app.get("/api/messages/unread-count", loginRequired, async (req, res) => {
        FROM messages m
        LEFT JOIN message_reads mr
          ON mr.message_id=m.id AND mr.member_id=$1
+       LEFT JOIN message_deletions md
+         ON md.message_id=m.id AND md.member_id=$1
        WHERE mr.message_id IS NULL
+         AND md.message_id IS NULL
          AND (
            m.recipient_type='all'
            OR (m.recipient_type='member' AND m.recipient_member_id=$1)
@@ -3694,8 +3803,9 @@ app.get("/messages", loginRequired, async (req, res) => {
   try {
     const member = req.session.member;
     const result = await pool.query(
-      `SELECT m.*, mr.read_at
+      `SELECT m.*, mr.read_at, s.name AS sender_name
        FROM messages m
+       LEFT JOIN members s ON s.id=m.sender_id
        LEFT JOIN message_reads mr ON mr.message_id=m.id AND mr.member_id=$1
        LEFT JOIN message_deletions md ON md.message_id=m.id AND md.member_id=$1
        WHERE md.message_id IS NULL
@@ -3708,7 +3818,7 @@ app.get("/messages", loginRequired, async (req, res) => {
     const rows = result.rows.map(m => `
       <div class="card">
         <h2>${esc(m.title)}</h2>
-        <p class="muted">Gesendet: ${esc(String(m.created_at))}${m.read_at ? ` · Gelesen: ${esc(String(m.read_at))}` : ' · <b>Neu</b>'}</p>
+        <p class="muted">Von: ${esc(m.sender_name || "TuRU 1880")} · Gesendet: ${esc(String(m.created_at))}${m.read_at ? ` · Gelesen: ${esc(String(m.read_at))}` : ' · <b>Neu</b>'}</p>
         <p style="white-space:pre-wrap">${esc(m.body)}</p>
         <div class="actions">
           ${!m.read_at ? `<form method="post" action="/messages/${m.id}/read"><button class="btn" type="submit">Als gelesen markieren</button></form>` : ''}
@@ -3717,7 +3827,12 @@ app.get("/messages", loginRequired, async (req, res) => {
           </form>
         </div>
       </div>`).join("");
-    res.send(page("Nachrichten", `<div class="hero"><h1>💬 Nachrichten</h1><p>Deine Nachrichten von TuRU 1880.</p></div>${rows || '<div class="card">Keine Nachrichten vorhanden.</div>'}`, req));
+    res.send(page("Nachrichten", `
+      <div class="hero"><h1>💬 Nachrichten</h1><p>Deine Nachrichten von TuRU 1880.</p>
+        <div class="actions"><a class="btn" href="/messages/new">✉️ Nachricht an Admin</a></div>
+      </div>
+      ${req.query.sent ? '<div class="card ok"><p>✓ Deine Nachricht wurde an die Administratoren gesendet.</p></div>' : ''}
+      ${rows || '<div class="card">Keine Nachrichten vorhanden.</div>'}`, req));
   } catch (error) {
     console.error("Fehler Nachrichten:", error);
     res.status(500).send("Serverfehler");
@@ -3776,20 +3891,73 @@ app.post("/messages/:id/read", loginRequired, async (req, res) => {
   }
 });
 
+app.get("/messages/new", loginRequired, async (req, res) => {
+  res.send(page("Nachricht an Admin", `
+    <div class="hero"><h1>✉️ Nachricht an den Admin</h1><p>Du kannst hier direkt eine Nachricht an die TuRU 1880 Administratoren senden.</p></div>
+    <div class="card">
+      <form method="post" action="/messages/to-admin">
+        <label>Titel</label>
+        <input name="title" maxlength="200" required>
+        <label>Nachricht</label>
+        <textarea name="body" rows="8" maxlength="5000" required></textarea>
+        <div class="actions">
+          <button class="btn" type="submit">Nachricht senden</button>
+          <a class="btn secondary" href="/messages">Zurück</a>
+        </div>
+      </form>
+    </div>
+  `, req));
+});
+
+app.post("/messages/to-admin", loginRequired, async (req, res) => {
+  try {
+    const title = String(req.body.title || "").trim();
+    const body = String(req.body.body || "").trim();
+    if (!title || !body) {
+      return res.status(400).send(page("Nachricht", `
+        <div class="card error"><h2>Nachricht unvollständig</h2><p>Bitte Titel und Nachricht ausfüllen.</p><a class="btn secondary" href="/messages/new">Zurück</a></div>
+      `, req));
+    }
+
+    await pool.query(
+      `INSERT INTO messages(sender_id,title,body,recipient_type,recipient_member_id)
+       VALUES($1,$2,$3,'admins',NULL)`,
+      [req.session.member.id, title, body]
+    );
+
+    const admins = await pool.query(
+      "SELECT id FROM members WHERE status='approved' AND admin=TRUE"
+    );
+    await sendPushToMembers(admins.rows.map(r => r.id), title, body);
+
+    res.redirect("/messages?sent=1");
+  } catch (error) {
+    console.error("Fehler Nachricht an Admin:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
 app.get("/admin/messages", adminRequired, async (req, res) => {
   try {
     const [messagesResult, membersResult] = await Promise.all([
-      pool.query(`SELECT m.*, COUNT(mr.member_id)::int AS read_count
-                  FROM messages m LEFT JOIN message_reads mr ON mr.message_id=m.id
-                  GROUP BY m.id ORDER BY m.created_at DESC`),
+      pool.query(`SELECT m.*, s.name AS sender_name, s.email AS sender_email, COUNT(mr.member_id)::int AS read_count
+                  FROM messages m
+                  LEFT JOIN members s ON s.id=m.sender_id
+                  LEFT JOIN message_reads mr ON mr.message_id=m.id
+                  GROUP BY m.id, s.name, s.email ORDER BY m.created_at DESC`),
       pool.query(`SELECT id,name,email FROM members WHERE status='approved' ORDER BY name,email`)
     ]);
     const options = membersResult.rows.map(m => `<option value="${m.id}">${esc(m.name)} (${esc(m.email)})</option>`).join("");
     const rows = messagesResult.rows.map(m => `<tr>
-      <td><b>${esc(m.title)}</b><br><span class="muted">${esc(String(m.created_at))}</span></td>
+      <td><b>${esc(m.title)}</b><br><span class="muted">Von: ${esc(m.sender_name || "System")} · ${esc(String(m.created_at))}</span></td>
       <td>${m.recipient_type==='all'?'Alle Nutzer':m.recipient_type==='admins'?'Administratoren':'Einzelner Nutzer'}</td>
       <td>${m.read_count}</td>
-      <td><a class="btn" href="/admin/messages/${m.id}/reads">Lesestatus</a></td></tr>`).join("");
+      <td><div class="actions">
+        <a class="btn" href="/admin/messages/${m.id}/reads">Lesestatus</a>
+        <form method="post" action="/admin/messages/${m.id}/delete" onsubmit="return confirm('Nachricht wirklich endgültig löschen?');">
+          <button class="btn secondary" type="submit">🗑️ Löschen</button>
+        </form>
+      </div></td></tr>`).join("");
     res.send(page("Kommunikation", `
       <div class="hero"><h1>📣 Kommunikations-Zentrale</h1><p>Nachrichten senden und Lesestatus prüfen.</p></div>
       <div class="card"><h2>Neue Nachricht</h2>
@@ -3827,6 +3995,19 @@ app.post("/admin/messages/send", adminRequired, async (req, res) => {
     await sendPushToMembers(recipientRows.rows.map(r => r.id), title, body);
     res.redirect("/admin/messages");
   } catch(error) { console.error(error); res.status(500).send("Serverfehler"); }
+});
+
+app.post("/admin/messages/:id/delete", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).send("Ungültige Nachricht.");
+    const result = await pool.query("DELETE FROM messages WHERE id=$1 RETURNING id", [id]);
+    if (!result.rowCount) return res.status(404).send("Nachricht nicht gefunden.");
+    res.redirect("/admin/messages");
+  } catch (error) {
+    console.error("Fehler Admin-Nachricht löschen:", error);
+    res.status(500).send("Serverfehler");
+  }
 });
 
 app.get("/admin/messages/:id/reads", adminRequired, async (req,res)=>{
