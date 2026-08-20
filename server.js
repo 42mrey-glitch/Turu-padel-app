@@ -1437,7 +1437,7 @@ app.get("/register", (req, res) => {
           dein Konto freischalten.
         </p>
 
-        <form method="post" action="/register" onsubmit="return confirm('Benutzer wirklich entsperren?');">
+        <form method="post" action="/register">
 
           <label>Name</label>
 
