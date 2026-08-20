@@ -1257,9 +1257,31 @@ function maskIban(value = "") {
   return `${iban.slice(0, 4)} **** **** ${iban.slice(-4)}`;
 }
 
-function isPlausibleIban(value = "") {
+function isValidIban(value = "") {
   const iban = normalizeIban(value);
-  return /^[A-Z]{2}[0-9A-Z]{13,32}$/.test(iban);
+  const lengths = {
+    AL:28, AD:24, AT:20, AZ:28, BH:22, BE:16, BA:20, BR:29, BG:22, CR:22,
+    HR:21, CY:28, CZ:24, DK:18, DO:28, EE:20, FO:18, FI:18, FR:27, GE:22,
+    DE:22, GI:23, GR:27, GL:18, GT:28, HU:28, IS:26, IE:22, IL:23, IT:27,
+    JO:30, KZ:20, KW:30, LV:21, LB:28, LI:21, LT:20, LU:20, MT:31, MR:27,
+    MU:30, MC:27, MD:24, ME:22, NL:18, MK:19, NO:15, PK:24, PL:28, PT:25,
+    QA:29, RO:24, SM:27, SA:24, RS:22, SK:24, SI:19, ES:24, SE:24, CH:21,
+    TN:24, TR:26, UA:29, AE:23, GB:22, VA:22
+  };
+  if (!/^[A-Z]{2}[0-9A-Z]+$/.test(iban)) return false;
+  if (lengths[iban.slice(0,2)] !== iban.length) return false;
+  const rearranged = iban.slice(4) + iban.slice(0,4);
+  let remainder = 0;
+  for (const ch of rearranged) {
+    const value = ch >= "A" && ch <= "Z" ? String(ch.charCodeAt(0) - 55) : ch;
+    for (const digit of String(value)) remainder = (remainder * 10 + Number(digit)) % 97;
+  }
+  return remainder === 1;
+}
+
+function isValidSignature(value = "") {
+  const signature = String(value || "");
+  return /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(signature) && signature.length <= 600000;
 }
 
 function addMonthsYmd(startYmd, months) {
@@ -1367,6 +1389,8 @@ async function initDb() {
       sepa_accepted_at TIMESTAMP,
       application_accepted BOOLEAN NOT NULL DEFAULT FALSE,
       application_accepted_at TIMESTAMP,
+      signature_data TEXT,
+      signature_created_at TIMESTAMP,
       notes TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -1378,6 +1402,9 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_membership_applications_status
     ON membership_applications(status, created_at DESC);
   `);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS signature_data TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS signature_created_at TIMESTAMP`);
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_membership_applications_email
     ON membership_applications(email);
@@ -1739,6 +1766,17 @@ app.get("/membership", (req, res) => {
           <span>Ich bestätige die Angaben und beantrage die gewählte Mitgliedschaft zu den oben beschriebenen Konditionen.</span>
         </label>
 
+        <h3>✍️ Unterschrift</h3>
+        <p class="muted">Bitte unterschreibe mit dem Finger bzw. mit der Maus. Die Unterschrift ist ein Pflichtfeld.</p>
+        <div style="border:1px solid #cfd8e3;border-radius:10px;background:#fff;max-width:650px">
+          <canvas id="signaturePad" width="650" height="220" style="width:100%;height:220px;display:block;touch-action:none"></canvas>
+        </div>
+        <input type="hidden" name="signature_data" id="signatureData">
+        <div class="actions" style="margin-top:8px">
+          <button class="btn secondary" type="button" id="clearSignature">Unterschrift löschen</button>
+          <span id="signatureHint" class="muted">Noch keine Unterschrift</span>
+        </div>
+
         <div class="actions">
           <button id="membershipSubmit" class="btn" type="submit">Mitgliedsantrag absenden</button>
         </div>
@@ -1748,6 +1786,7 @@ app.get("/membership", (req, res) => {
           const input = document.getElementById("membershipBirthDate");
           const warning = document.getElementById("minorWarning");
           const button = document.getElementById("membershipSubmit");
+          const form = button.closest("form");
           const cutoff = "${adultCutoffYmd()}";
           function checkAge() {
             const minor = !input.value || input.value > cutoff;
@@ -1757,6 +1796,33 @@ app.get("/membership", (req, res) => {
           input.addEventListener("change", checkAge);
           input.addEventListener("input", checkAge);
           checkAge();
+
+          const canvas = document.getElementById("signaturePad");
+          const hidden = document.getElementById("signatureData");
+          const hint = document.getElementById("signatureHint");
+          const clear = document.getElementById("clearSignature");
+          const ctx = canvas.getContext("2d");
+          ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+          let drawing = false;
+          function point(e) {
+            const r = canvas.getBoundingClientRect();
+            return {x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height};
+          }
+          canvas.addEventListener("pointerdown", e => {
+            e.preventDefault(); drawing=true; canvas.setPointerCapture?.(e.pointerId);
+            const p=point(e); ctx.beginPath(); ctx.moveTo(p.x,p.y);
+          });
+          canvas.addEventListener("pointermove", e => {
+            if(!drawing)return; e.preventDefault();
+            const p=point(e); ctx.lineTo(p.x,p.y); ctx.stroke();
+            hidden.value=canvas.toDataURL("image/png"); hint.textContent="Unterschrift vorhanden ✓";
+          });
+          canvas.addEventListener("pointerup",()=>drawing=false);
+          canvas.addEventListener("pointercancel",()=>drawing=false);
+          clear.addEventListener("click",()=>{ctx.clearRect(0,0,canvas.width,canvas.height);hidden.value="";hint.textContent="Noch keine Unterschrift";});
+          form.addEventListener("submit",e=>{
+            if(!hidden.value){e.preventDefault();alert("Bitte unterschreibe den Mitgliedsantrag.");canvas.scrollIntoView({behavior:"smooth",block:"center"});}
+          });
         })();
       </script>
     </div>
@@ -1779,6 +1845,7 @@ app.post("/membership/apply", async (req, res) => {
     const iban = normalizeIban(req.body.iban || "");
     const sepaAccepted = req.body.sepa_accepted === "1";
     const applicationAccepted = req.body.application_accepted === "1";
+    const signatureData = String(req.body.signature_data || "");
 
     if (!firstName || !lastName || !street || !houseNumber || !postalCode || !city ||
         !birthDate || !email || !["monthly", "annual"].includes(plan) ||
@@ -1786,7 +1853,7 @@ app.post("/membership/apply", async (req, res) => {
       return res.status(400).send(page("Mitgliedsantrag", `
         <div class="card error">
           <h2>Antrag unvollständig</h2>
-          <p>Bitte fülle alle Pflichtfelder korrekt aus und bestätige beide Erklärungen.</p>
+          <p>Bitte fülle alle Pflichtfelder korrekt aus, gib eine gültige IBAN an, bestätige beide Erklärungen und unterschreibe den Antrag.</p>
           <a class="btn" href="/membership">Zurück zum Antrag</a>
         </div>
       `, req));
@@ -1826,9 +1893,10 @@ app.post("/membership/apply", async (req, res) => {
         first_name,last_name,street,house_number,postal_code,city,birth_date,
         email,phone,plan,amount_cents,billing_interval,
         iban_masked,iban_full,account_holder,
-        sepa_accepted,sepa_accepted_at,application_accepted,application_accepted_at
+        sepa_accepted,sepa_accepted_at,application_accepted,application_accepted_at,
+        signature_data,signature_created_at
       ) VALUES(
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,TRUE,NOW(),TRUE,NOW()
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,TRUE,NOW(),TRUE,NOW(),$16,NOW()
       )`,
       [
         firstName,lastName,street,houseNumber,postalCode,city,birthDate,
@@ -4577,6 +4645,7 @@ app.get("/admin/membership/:id/view", adminRequired, async (req, res) => {
           <tr><th>IBAN</th><td>${esc(a.iban_masked)}</td></tr>
           <tr><th>SEPA akzeptiert</th><td>${a.sepa_accepted ? "Ja" : "Nein"}</td></tr>
           <tr><th>Antrag akzeptiert</th><td>${a.application_accepted ? "Ja" : "Nein"}</td></tr>
+          <tr><th>Unterschrift</th><td>${a.signature_data ? `<img src="${a.signature_data}" alt="Digitale Unterschrift" style="max-width:420px;max-height:140px;border:1px solid #ddd;background:#fff">` : "Nicht vorhanden"}</td></tr>
         </table>
 
         ${a.notes ? `<h2>Notizen</h2><p style="white-space:pre-wrap">${esc(a.notes)}</p>` : ""}
