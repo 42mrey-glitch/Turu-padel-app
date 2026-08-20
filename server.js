@@ -1572,18 +1572,6 @@ app.get("/", async (req, res) => {
           hier kannst du deinen Padelplatz einfach und schnell buchen.
         </p>
 
-        <div class="card" style="margin:18px 0">
-          <h2>🎾 Platzreservierung</h2>
-          <p>
-            <b>TuRU 1880 Düsseldorf verfügt über einen eigenen Padelplatz für Mitglieder.</b>
-            Dieser Platz kann direkt über die TuRU-Padel-App reserviert werden.
-          </p>
-          <p>
-            <b>Alle weiteren Padelplätze können über PadelCity gebucht werden.</b>
-            Dafür ist eine separate Registrierung bei PadelCity erforderlich.
-          </p>
-        </div>
-
         <div class="actions">
 
           ${req.session.member.hasActiveBooking
@@ -1620,24 +1608,10 @@ app.get("/", async (req, res) => {
           von TuRU 1880 Düsseldorf.
         </p>
 
-        <div class="card" style="margin:18px 0">
-          <h2>🎾 Platzreservierung</h2>
-          <p>
-            <b>TuRU 1880 Düsseldorf verfügt über einen eigenen Padelplatz für Mitglieder.</b>
-            TuRU-Mitglieder können auf diesem Platz die verfügbaren Zeitslots direkt über
-            die TuRU-Padel-App reservieren.
-          </p>
-
-          <p>
-            <b>Alle weiteren Padelplätze können über PadelCity gebucht werden.</b>
-            Dafür ist eine separate Registrierung bei PadelCity erforderlich.
-          </p>
-
-          <p class="muted">
-            🎾 1 Platz exklusiv für TuRU-Mitglieder · 📅 Reservierung direkt über die TuRU-Padel-App ·
-            🎾 Weitere Plätze über PadelCity
-          </p>
-        </div>
+        <p>
+          Padelplätze können ausschließlich von
+          freigeschalteten Mitgliedern gebucht werden.
+        </p>
 
         <div class="actions">
 
@@ -1808,7 +1782,13 @@ app.get("/membership", (req, res) => {
         <p class="muted">Die Belastung erfolgt erst nach Annahme des Mitgliedsantrags und nach Maßgabe eurer SEPA-Informationen.</p>
         <div class="grid">
           <div><label>Kontoinhaber</label><input type="text" name="account_holder" maxlength="150" required></div>
-          <div><label>IBAN</label><input type="text" name="iban" autocomplete="off" maxlength="40" required></div>
+          <div>
+            <label>IBAN</label>
+            <input id="membershipIban" type="text" name="iban" autocomplete="off" maxlength="40" required>
+            <div id="ibanWarning" class="alert" style="display:none;margin-top:8px">
+              ⚠️ Bitte überprüfe deine IBAN. Die eingegebene IBAN ist ungültig.
+            </div>
+          </div>
         </div>
 
         <label style="display:flex;gap:10px;align-items:flex-start;margin-top:16px">
@@ -1852,6 +1832,31 @@ app.get("/membership", (req, res) => {
           input.addEventListener("input", checkAge);
           checkAge();
 
+          const ibanInput = document.getElementById("membershipIban");
+          const ibanWarning = document.getElementById("ibanWarning");
+          function checkIban() {
+            const iban = String(ibanInput.value || "").replace(/\s+/g, "").toUpperCase();
+            if (!iban) {
+              ibanWarning.style.display = "none";
+              return false;
+            }
+            const lengths = {DE:22};
+            let valid = /^[A-Z]{2}[0-9A-Z]+$/.test(iban) && lengths[iban.slice(0,2)] === iban.length;
+            if (valid) {
+              const rearranged = iban.slice(4) + iban.slice(0,4);
+              let remainder = 0;
+              for (const ch of rearranged) {
+                const value = ch >= "A" && ch <= "Z" ? String(ch.charCodeAt(0) - 55) : ch;
+                for (const digit of String(value)) remainder = (remainder * 10 + Number(digit)) % 97;
+              }
+              valid = remainder === 1;
+            }
+            ibanWarning.style.display = valid ? "none" : "block";
+            return valid;
+          }
+          ibanInput.addEventListener("input", checkIban);
+          ibanInput.addEventListener("blur", checkIban);
+
           const canvas = document.getElementById("signaturePad");
           const hidden = document.getElementById("signatureData");
           const hint = document.getElementById("signatureHint");
@@ -1876,7 +1881,17 @@ app.get("/membership", (req, res) => {
           canvas.addEventListener("pointercancel",()=>drawing=false);
           clear.addEventListener("click",()=>{ctx.clearRect(0,0,canvas.width,canvas.height);hidden.value="";hint.textContent="Noch keine Unterschrift";});
           form.addEventListener("submit",e=>{
-            if(!hidden.value){e.preventDefault();alert("Bitte unterschreibe den Mitgliedsantrag.");canvas.scrollIntoView({behavior:"smooth",block:"center"});}
+            if(!checkIban()){
+              e.preventDefault();
+              ibanInput.focus();
+              ibanInput.scrollIntoView({behavior:"smooth",block:"center"});
+              return;
+            }
+            if(!hidden.value){
+              e.preventDefault();
+              alert("Bitte unterschreibe den Mitgliedsantrag.");
+              canvas.scrollIntoView({behavior:"smooth",block:"center"});
+            }
           });
         })();
       </script>
@@ -1902,13 +1917,23 @@ app.post("/membership/apply", async (req, res) => {
     const applicationAccepted = req.body.application_accepted === "1";
     const signatureData = String(req.body.signature_data || "");
 
+    if (!isValidIban(iban)) {
+      return res.status(400).send(page("Mitgliedsantrag", `
+        <div class="card warn">
+          <h2>⚠️ IBAN bitte überprüfen</h2>
+          <p>Die eingegebene IBAN ist ungültig. Bitte überprüfe die IBAN und versuche es erneut.</p>
+          <a class="btn" href="/membership">Zurück zum Antrag</a>
+        </div>
+      `, req));
+    }
+
     if (!firstName || !lastName || !street || !houseNumber || !postalCode || !city ||
         !birthDate || !email || !["monthly", "annual"].includes(plan) ||
-        !accountHolder || !isPlausibleIban(iban) || !sepaAccepted || !applicationAccepted) {
+        !accountHolder || !sepaAccepted || !applicationAccepted || !isValidSignature(signatureData)) {
       return res.status(400).send(page("Mitgliedsantrag", `
         <div class="card error">
           <h2>Antrag unvollständig</h2>
-          <p>Bitte fülle alle Pflichtfelder korrekt aus, gib eine gültige IBAN an, bestätige beide Erklärungen und unterschreibe den Antrag.</p>
+          <p>Bitte fülle alle Pflichtfelder korrekt aus, bestätige beide Erklärungen und unterschreibe den Antrag.</p>
           <a class="btn" href="/membership">Zurück zum Antrag</a>
         </div>
       `, req));
