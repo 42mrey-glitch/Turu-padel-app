@@ -1142,6 +1142,31 @@ async function initDb() {
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS terms_version TEXT`);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1`);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS terms_acceptances(
+      id SERIAL PRIMARY KEY,
+      member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      terms_version TEXT NOT NULL,
+      accepted_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_terms_acceptances_member
+    ON terms_acceptances(member_id, accepted_at DESC);
+  `);
+  await pool.query(`
+    INSERT INTO terms_acceptances(member_id, terms_version, accepted_at)
+    SELECT m.id, m.terms_version, m.terms_accepted_at
+    FROM members m
+    WHERE m.terms_accepted_at IS NOT NULL
+      AND m.terms_version IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM terms_acceptances a
+        WHERE a.member_id = m.id
+          AND a.terms_version = m.terms_version
+          AND a.accepted_at = m.terms_accepted_at
+      );
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings(
       id SERIAL PRIMARY KEY,
       member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -1591,6 +1616,11 @@ app.post("/terms/accept", async (req, res) => {
     );
     if (!result.rowCount) return res.redirect("/login");
 
+    await pool.query(
+      "INSERT INTO terms_acceptances(member_id, terms_version, accepted_at) VALUES($1,$2,NOW())",
+      [result.rows[0].id, TERMS_VERSION]
+    );
+
     res.redirect("/login");
   } catch (error) {
     console.error(error);
@@ -1599,45 +1629,72 @@ app.post("/terms/accept", async (req, res) => {
 });
 
 
-app.get("/admin/terms", async (req, res) => {
+app.get("/admin/terms", requireAdmin, async (req, res) => {
   try {
-    const user = await currentUser(req);
-    if (!user || user.role !== "admin") return res.status(403).send("Keine Berechtigung");
-
-    const result = await pool.query(`
-      SELECT id, name, email, role, status, terms_accepted_at, terms_version
-      FROM members
-      ORDER BY terms_accepted_at DESC NULLS LAST, name ASC
+    const acceptedResult = await pool.query(`
+      SELECT
+        m.name,
+        m.email,
+        m.status,
+        a.terms_version,
+        a.accepted_at
+      FROM terms_acceptances a
+      JOIN members m ON m.id = a.member_id
+      ORDER BY a.accepted_at DESC
     `);
 
-    const rows = result.rows.map(m => `
+    const missingResult = await pool.query(
+      `SELECT name, email, status
+       FROM members
+       WHERE terms_accepted_at IS NULL
+          OR terms_version IS DISTINCT FROM $1
+       ORDER BY name ASC`,
+      [TERMS_VERSION]
+    );
+
+    const acceptedRows = acceptedResult.rows.map(m => `
       <tr>
         <td>${esc(m.name || "")}</td>
         <td>${esc(m.email || "")}</td>
-        <td>${esc(m.role || "")}</td>
         <td>${esc(m.status || "")}</td>
-        <td>${m.terms_accepted_at ? new Date(m.terms_accepted_at).toLocaleString("de-DE") : "Noch nicht akzeptiert"}</td>
-        <td>${esc(m.terms_version || "Keine Version")}</td>
+        <td>${new Date(m.accepted_at).toLocaleString("de-DE")}</td>
+        <td>${esc(m.terms_version)}</td>
       </tr>
     `).join("");
 
-    res.send(page("Akzeptierte Nutzungsbedingungen", `
+    const missingRows = missingResult.rows.map(m => `
+      <tr>
+        <td>${esc(m.name || "")}</td>
+        <td>${esc(m.email || "")}</td>
+        <td>${esc(m.status || "")}</td>
+        <td>Erinnerung bei Anmeldung aktiv</td>
+      </tr>
+    `).join("");
+
+    res.send(page("Nutzungsbedingungen – Verwaltung", `
       <div class="card">
-        <h1>📜 Nutzungsbedingungen – Administrator</h1>
-        <p>Hier siehst du, welcher Benutzer wann welche Version der Nutzungsbedingungen akzeptiert hat.</p>
+        <h1>📜 Nutzungsbedingungen – Protokoll</h1>
+        <p>Jede Zustimmung wird mit Benutzer, Datum/Uhrzeit und Versionsnummer dauerhaft protokolliert.</p>
+        <p><strong>Aktuelle Version:</strong> ${TERMS_VERSION}</p>
+      </div>
+
+      <div class="card">
+        <h2>Noch nicht akzeptiert</h2>
+        <p>Diese Nutzer erhalten bei der Anmeldung eine Erinnerung und können die aktuelle Version direkt öffnen und akzeptieren.</p>
         <div style="overflow-x:auto">
           <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>E-Mail</th>
-                <th>Rolle</th>
-                <th>Status</th>
-                <th>Akzeptiert am</th>
-                <th>Version</th>
-              </tr>
-            </thead>
-            <tbody>${rows || '<tr><td colspan="6">Keine Benutzer vorhanden.</td></tr>'}</tbody>
+            <thead><tr><th>Name</th><th>E-Mail</th><th>Status</th><th>Hinweis</th></tr></thead>
+            <tbody>${missingRows || '<tr><td colspan="4">Alle Benutzer haben die aktuelle Version akzeptiert.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Akzeptierungsprotokoll</h2>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr><th>Name</th><th>E-Mail</th><th>Status</th><th>Akzeptiert am</th><th>Version</th></tr></thead>
+            <tbody>${acceptedRows || '<tr><td colspan="5">Noch keine Akzeptierungen vorhanden.</td></tr>'}</tbody>
           </table>
         </div>
         <div class="actions">
@@ -1645,10 +1702,11 @@ app.get("/admin/terms", async (req, res) => {
         </div>
       </div>`, req));
   } catch (error) {
-    console.error(error);
-    res.status(500).send("Serverfehler");
+    console.error("Fehler bei Nutzungsbedingungen-Verwaltung:", error);
+    res.status(500).send(page("Serverfehler", `<div class="card error"><h2>Fehler</h2><p>Die Übersicht konnte nicht geladen werden.</p><a class="btn secondary" href="/admin">Zurück</a></div>`, req));
   }
 });
+
 
 app.get("/login", (req, res) => {
 
