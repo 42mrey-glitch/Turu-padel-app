@@ -6,6 +6,8 @@ const bcrypt = require("bcryptjs");
 
 const app = express();
 
+const TERMS_VERSION = "2026-08-20-v2";
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.get("/turu-logo-v2.png", (req, res) => res.sendFile(__dirname + "/turu-logo-v2.png"));
@@ -1291,13 +1293,51 @@ app.get("/", (req, res) => {
 
 app.get("/terms", (req, res) => {
   res.send(page("Nutzungsbedingungen", `
-    <div class="card"><h1>Nutzungsbedingungen – TuRU 1880 Padel</h1>
-    <p>Stand: 20.08.2026</p>
-    <h2>1. Buchungen</h2><p>Buchungen sind verbindlich. Termine dürfen nur über die App gebucht oder storniert werden.</p>
-    <h2>2. Anzeige von Buchungen</h2><p>Bei Buchungen wird der Vorname angezeigt. Optional kann ein freiwillig hinterlegter Alias angezeigt werden.</p>
-    <h2>3. Nutzung</h2><p>Die Nutzer sind für die Richtigkeit ihrer Angaben und die ordnungsgemäße Nutzung der Anlage verantwortlich. Der Administrator kann Konten bei Verstößen sperren.</p>
-    <h2>4. Änderungen</h2><p>Die Nutzungsbedingungen können aktualisiert werden. Bei wesentlichen Änderungen kann eine erneute Zustimmung erforderlich sein.</p>
-    <p><a class="btn" href="/register">Zur Registrierung</a></p></div>`, req));
+    <div class="card">
+      <h1>Nutzungsbedingungen – TuRU 1880 Padel</h1>
+      <p class="muted">Version ${TERMS_VERSION} · Stand: 20.08.2026</p>
+
+      <h2>1. Geltungsbereich</h2>
+      <p>Diese Nutzungsbedingungen regeln die Nutzung der TuRU 1880 Padel-App und die darüber angebotenen Funktionen, insbesondere Registrierung, Buchung, Anzeige und Stornierung von Padelterminen.</p>
+
+      <h2>2. Registrierung und Benutzerkonto</h2>
+      <p>Für die Nutzung geschützter Funktionen ist ein persönliches Benutzerkonto erforderlich. Die bei der Registrierung gemachten Angaben müssen richtig sein. Zugangsdaten und Passwort sind vertraulich zu behandeln und dürfen nicht an andere Personen weitergegeben werden.</p>
+
+      <h2>3. Zustimmung zu diesen Nutzungsbedingungen</h2>
+      <p>Die Nutzungsbedingungen können jederzeit über diesen Bereich gelesen werden. Für Registrierung und Nutzung des Benutzerkontos ist eine aktive Zustimmung erforderlich. Ohne Zustimmung ist keine Registrierung beziehungsweise Nutzung der geschützten Funktionen möglich.</p>
+
+      <h2>4. Buchungen</h2>
+      <p>Buchungen sind erst verbindlich, nachdem sie in der App ausdrücklich bestätigt und erfolgreich gespeichert wurden. Jede Nutzerin und jeder Nutzer ist dafür verantwortlich, die ausgewählte Zeit und den Platz vor der Bestätigung zu prüfen. Buchungen in der Vergangenheit sind nicht möglich.</p>
+
+      <h2>5. Stornierungen</h2>
+      <p>Stornierungen müssen in der App ausdrücklich bestätigt werden. Nach erfolgreicher Stornierung ist der Termin wieder nach den jeweils geltenden Buchungsregeln verfügbar.</p>
+
+      <h2>6. Anzeige von Namen und Alias</h2>
+      <p>Bei Buchungen wird zur Information anderer Nutzer grundsätzlich der Vorname angezeigt. Stattdessen kann freiwillig ein Alias hinterlegt werden. Ist ein Alias vorhanden, kann dieser bei der Buchungsanzeige verwendet werden. Der Alias ist keine Pflichtangabe.</p>
+
+      <h2>7. Verhalten und ordnungsgemäße Nutzung</h2>
+      <p>Die Anlage und die App sind verantwortungsvoll zu nutzen. Unzulässig sind insbesondere missbräuchliche Buchungen, falsche Angaben, die Nutzung fremder Konten sowie Handlungen, die den ordnungsgemäßen Betrieb oder andere Nutzer beeinträchtigen.</p>
+
+      <h2>8. Sperrung und Rechteänderungen</h2>
+      <p>Bei Verstößen gegen diese Nutzungsbedingungen oder bei organisatorischer Notwendigkeit kann ein Benutzerkonto gesperrt oder dessen Rechte geändert werden. Gesperrte Nutzer dürfen geschützte Funktionen nicht weiter nutzen. Bei Sperrungen oder relevanten Rechteänderungen kann eine bestehende Sitzung automatisch beendet werden.</p>
+
+      <h2>9. Verfügbarkeit und technische Änderungen</h2>
+      <p>Ein Anspruch auf eine jederzeit störungsfreie Verfügbarkeit der App besteht nicht. Funktionen, Buchungsregeln und technische Abläufe können weiterentwickelt oder angepasst werden.</p>
+
+      <h2>10. Änderungen der Nutzungsbedingungen</h2>
+      <p>Diese Nutzungsbedingungen können für die Weiterentwicklung der App oder aus organisatorischen beziehungsweise rechtlichen Gründen geändert werden. Bei einer neuen Version kann vor der weiteren Nutzung eine erneute aktive Zustimmung verlangt werden.</p>
+
+      <h2>11. Datenschutz</h2>
+      <p>Personenbezogene Daten werden nur im Rahmen der für Registrierung, Benutzerverwaltung und Buchungsfunktion erforderlichen Verarbeitung genutzt. Weitere Informationen können in einer gesonderten Datenschutzerklärung bereitgestellt werden.</p>
+
+      <h2>12. Schlussbestimmung</h2>
+      <p>Mit der aktiven Zustimmung bestätigt der Nutzer, diese Nutzungsbedingungen gelesen und akzeptiert zu haben.</p>
+
+      <div class="actions">
+        <a class="btn" href="/register">Registrieren und akzeptieren</a>
+        <a class="btn secondary" href="/">Zur Startseite</a>
+      </div>
+    </div>`, req));
 });
 
 app.get("/register", (req, res) => {
@@ -1466,8 +1506,8 @@ app.post("/register", async (req, res) => {
 
     await pool.query(
 
-      "INSERT INTO members(name,email,password_hash,status,alias,terms_accepted_at,terms_version) VALUES($1,$2,$3,'pending',$4,NOW(),'2026-08-20')",
-      [name, email, hash, alias || null]
+      "INSERT INTO members(name,email,password_hash,status,alias,terms_accepted_at,terms_version) VALUES($1,$2,$3,'pending',$4,NOW(),$5)",
+      [name, email, hash, alias || null, TERMS_VERSION]
 
     );
 
@@ -1501,6 +1541,49 @@ app.post("/register", async (req, res) => {
   }
 });
 
+
+app.get("/terms/accept", (req, res) => {
+  const email = String(req.query.email || "").trim().toLowerCase();
+  if (!email) return res.redirect("/login");
+
+  res.send(page("Nutzungsbedingungen akzeptieren", `
+    <div class="card">
+      <h1>Nutzungsbedingungen</h1>
+      <p>Bitte lies die vollständigen <a href="/terms" target="_blank">Nutzungsbedingungen</a>. Erst nach deiner aktiven Zustimmung kannst du dich anmelden.</p>
+      <form method="post" action="/terms/accept">
+        <input type="hidden" name="email" value="${esc(email)}">
+        <label style="display:flex;align-items:flex-start;gap:8px">
+          <input type="checkbox" name="accept_terms" value="yes" style="width:auto;margin-top:4px" required>
+          <span>Ich habe die Nutzungsbedingungen gelesen und akzeptiere die Version ${TERMS_VERSION}.</span>
+        </label>
+        <div class="actions">
+          <button class="btn" type="submit">Nutzungsbedingungen akzeptieren</button>
+          <a class="btn secondary" href="/login">Abbrechen</a>
+        </div>
+      </form>
+    </div>`, req));
+});
+
+app.post("/terms/accept", async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const accepted = req.body.accept_terms === "yes";
+    if (!email || !accepted) {
+      return res.status(400).send(page("Fehler", `<div class="card error"><h2>Zustimmung erforderlich</h2><p>Bitte bestätige die Nutzungsbedingungen.</p><a class="btn secondary" href="/login">Zum Login</a></div>`, req));
+    }
+
+    const result = await pool.query(
+      "UPDATE members SET terms_accepted_at=NOW(), terms_version=$1 WHERE email=$2 RETURNING id",
+      [TERMS_VERSION, email]
+    );
+    if (!result.rowCount) return res.redirect("/login");
+
+    res.redirect("/login");
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Serverfehler");
+  }
+});
 
 app.get("/login", (req, res) => {
 
@@ -1614,6 +1697,26 @@ app.post("/login", async (req, res) => {
           </div>
           `,
 
+          req
+        )
+      );
+    }
+
+
+    if (!member.terms_accepted_at || member.terms_version !== TERMS_VERSION) {
+
+      return res.status(403).send(
+        page(
+          "Nutzungsbedingungen",
+          `
+          <div class="card warn">
+            <h2>Nutzungsbedingungen bestätigen</h2>
+            <p>Bevor du die TuRU 1880 Padel-App weiter nutzen kannst, musst du die aktuelle Version der Nutzungsbedingungen lesen und aktiv akzeptieren.</p>
+            <div class="actions">
+              <a class="btn" href="/terms/accept?email=${encodeURIComponent(email)}">Nutzungsbedingungen öffnen</a>
+              <a class="btn secondary" href="/login">Abbrechen</a>
+            </div>
+          </div>`,
           req
         )
       );
