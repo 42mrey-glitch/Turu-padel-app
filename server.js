@@ -1639,28 +1639,23 @@ app.post("/terms/accept", async (req, res) => {
 });
 
 
+
 app.get("/admin/terms", adminRequired, async (req, res) => {
   try {
     const acceptedResult = await pool.query(`
-      SELECT
-        m.name,
-        m.email,
-        m.status,
-        a.terms_version,
-        a.accepted_at
+      SELECT m.name, m.email, m.status, a.terms_version, a.accepted_at
       FROM terms_acceptances a
       JOIN members m ON m.id = a.member_id
       ORDER BY a.accepted_at DESC
     `);
 
-    const missingResult = await pool.query(
-      `SELECT name, email, status
-       FROM members
-       WHERE terms_accepted_at IS NULL
-          OR terms_version IS DISTINCT FROM $1
-       ORDER BY name ASC`,
-      [TERMS_VERSION]
-    );
+    const missingResult = await pool.query(`
+      SELECT name, email, status
+      FROM members
+      WHERE terms_accepted_at IS NULL
+         OR terms_version IS DISTINCT FROM $1
+      ORDER BY name ASC
+    `, [TERMS_VERSION]);
 
     const acceptedRows = acceptedResult.rows.map(m => `
       <tr>
@@ -1668,7 +1663,7 @@ app.get("/admin/terms", adminRequired, async (req, res) => {
         <td>${esc(m.email || "")}</td>
         <td>${esc(m.status || "")}</td>
         <td>${new Date(m.accepted_at).toLocaleString("de-DE")}</td>
-        <td>${esc(m.terms_version)}</td>
+        <td>${esc(m.terms_version || "")}</td>
       </tr>
     `).join("");
 
@@ -1677,24 +1672,28 @@ app.get("/admin/terms", adminRequired, async (req, res) => {
         <td>${esc(m.name || "")}</td>
         <td>${esc(m.email || "")}</td>
         <td>${esc(m.status || "")}</td>
-        <td>Erinnerung bei Anmeldung aktiv</td>
+        <td>Aktuelle Version noch nicht akzeptiert</td>
       </tr>
     `).join("");
 
     res.send(page("Nutzungsbedingungen – Verwaltung", `
       <div class="card">
         <h1>📜 Nutzungsbedingungen – Protokoll</h1>
-        <p>Jede Zustimmung wird mit Benutzer, Datum/Uhrzeit und Versionsnummer dauerhaft protokolliert.</p>
         <p><strong>Aktuelle Version:</strong> ${TERMS_VERSION}</p>
+        <p>Jede gespeicherte Zustimmung enthält Benutzer, Datum, Uhrzeit und Versionsnummer.</p>
       </div>
 
       <div class="card">
-        <h2>Noch nicht akzeptiert</h2>
-        <p>Diese Nutzer erhalten bei der Anmeldung eine Erinnerung und können die aktuelle Version direkt öffnen und akzeptieren.</p>
+        <h2>Erinnerung erforderlich</h2>
+        <p>Diese Benutzer haben die aktuelle Version noch nicht akzeptiert.</p>
         <div style="overflow-x:auto">
           <table>
-            <thead><tr><th>Name</th><th>E-Mail</th><th>Status</th><th>Hinweis</th></tr></thead>
-            <tbody>${missingRows || '<tr><td colspan="4">Alle Benutzer haben die aktuelle Version akzeptiert.</td></tr>'}</tbody>
+            <thead>
+              <tr><th>Name</th><th>E-Mail</th><th>Status</th><th>Hinweis</th></tr>
+            </thead>
+            <tbody>
+              ${missingRows || '<tr><td colspan="4">Alle Benutzer haben die aktuelle Version akzeptiert.</td></tr>'}
+            </tbody>
           </table>
         </div>
       </div>
@@ -1703,17 +1702,20 @@ app.get("/admin/terms", adminRequired, async (req, res) => {
         <h2>Akzeptierungsprotokoll</h2>
         <div style="overflow-x:auto">
           <table>
-            <thead><tr><th>Name</th><th>E-Mail</th><th>Status</th><th>Akzeptiert am</th><th>Version</th></tr></thead>
-            <tbody>${acceptedRows || '<tr><td colspan="5">Noch keine Akzeptierungen vorhanden.</td></tr>'}</tbody>
+            <thead>
+              <tr><th>Name</th><th>E-Mail</th><th>Status</th><th>Akzeptiert am</th><th>Version</th></tr>
+            </thead>
+            <tbody>
+              ${acceptedRows || '<tr><td colspan="5">Noch keine Akzeptierungen vorhanden.</td></tr>'}
+            </tbody>
           </table>
         </div>
-        <div class="actions">
-          <a class="btn secondary" href="/admin">Zur Administration</a>
-        </div>
-      </div>`, req));
+        <p><a class="btn secondary" href="/admin">Zur Administration</a></p>
+      </div>
+    `, req));
   } catch (error) {
-    console.error("Fehler bei Nutzungsbedingungen-Verwaltung:", error);
-    res.status(500).send(page("Serverfehler", `<div class="card error"><h2>Fehler</h2><p>Die Übersicht konnte nicht geladen werden.</p><a class="btn secondary" href="/admin">Zurück</a></div>`, req));
+    console.error("Fehler /admin/terms:", error);
+    res.status(500).send("Serverfehler");
   }
 });
 
