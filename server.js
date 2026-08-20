@@ -1404,6 +1404,30 @@ async function initDb() {
   `);
   await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS signature_data TEXT`);
   await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS signature_created_at TIMESTAMP`);
+  // Kompatibilität mit älteren Datenbankständen: fehlende Antragsspalten nachrüsten.
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS first_name TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS last_name TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS street TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS house_number TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS postal_code TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS city TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS birth_date DATE`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS email TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS phone TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS plan TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS amount_cents INTEGER`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS billing_interval TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS iban_masked TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS iban_full TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS account_holder TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS sepa_accepted BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS sepa_accepted_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS application_accepted BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS application_accepted_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS notes TEXT`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
 
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_membership_applications_email
@@ -1952,9 +1976,10 @@ app.post("/membership/apply", async (req, res) => {
     const duplicate = await pool.query(
       `SELECT id, first_name, last_name, email, status
        FROM membership_applications
-       WHERE lower(trim(email)) = lower(trim($1))
-          OR (lower(trim(first_name)) = lower(trim($2))
-              AND lower(trim(last_name)) = lower(trim($3)))
+       WHERE status IN ('pending','approved')
+         AND (lower(trim(email)) = lower(trim($1))
+              OR (lower(trim(first_name)) = lower(trim($2))
+                  AND lower(trim(last_name)) = lower(trim($3))))
        ORDER BY created_at DESC
        LIMIT 1`,
       [email, firstName, lastName]
@@ -2014,7 +2039,13 @@ app.post("/membership/apply", async (req, res) => {
     `, req));
   } catch (error) {
     console.error("Fehler Mitgliedsantrag:", error);
-    res.status(500).send("Serverfehler");
+    res.status(400).send(page("Mitgliedsantrag", `
+      <div class="card error">
+        <h2>⚠️ Antrag konnte nicht gespeichert werden</h2>
+        <p>Bitte überprüfe deine Angaben und versuche es erneut. Wenn alle Angaben korrekt sind, wende dich bitte an TuRU 1880.</p>
+        <a class="btn" href="/membership">Zurück zum Antrag</a>
+      </div>
+    `, req));
   }
 });
 
