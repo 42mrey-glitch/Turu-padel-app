@@ -3544,7 +3544,7 @@ app.get("/admin/messages", adminRequired, async (req, res) => {
       pool.query(`SELECT m.*, COUNT(mr.member_id)::int AS read_count
                   FROM messages m LEFT JOIN message_reads mr ON mr.message_id=m.id
                   GROUP BY m.id ORDER BY m.created_at DESC`),
-      pool.query(`SELECT id,name,email FROM members WHERE COALESCE(blocked,FALSE)=FALSE ORDER BY name,email`)
+      pool.query(`SELECT id,name,email FROM members WHERE status='approved' ORDER BY name,email`)
     ]);
     const options = membersResult.rows.map(m => `<option value="${m.id}">${esc(m.name)} (${esc(m.email)})</option>`).join("");
     const rows = messagesResult.rows.map(m => `<tr>
