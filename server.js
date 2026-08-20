@@ -856,7 +856,7 @@ function nav(req) {
     ${req.session.member.admin
       ? `<a class="${active("/admin")}" href="/admin">Administration</a>`
       : ""}
-    <form method="post" action="/logout">
+    <form method="post" action="/logout" onsubmit="return confirm('Benutzer wirklich sperren? Der Benutzer wird sofort abgemeldet und kann sich nicht mehr anmelden.');">
       <button type="submit">Abmelden</button>
     </form>
   </nav>`;
@@ -1142,6 +1142,22 @@ async function initDb() {
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS terms_version TEXT`);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1`);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS member_status_log(
+      id SERIAL PRIMARY KEY,
+      member_id INTEGER,
+      member_name TEXT,
+      member_email TEXT,
+      action TEXT NOT NULL,
+      old_status TEXT,
+      new_status TEXT,
+      old_admin BOOLEAN,
+      new_admin BOOLEAN,
+      changed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      changed_by INTEGER
+    );
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS terms_acceptances(
       id SERIAL PRIMARY KEY,
       member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -1153,6 +1169,11 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_terms_acceptances_member
     ON terms_acceptances(member_id, accepted_at DESC);
   `);
+  await pool.query(`ALTER TABLE terms_acceptances ADD COLUMN IF NOT EXISTS member_name TEXT`);
+  await pool.query(`ALTER TABLE terms_acceptances ADD COLUMN IF NOT EXISTS member_email TEXT`);
+  await pool.query(`ALTER TABLE terms_acceptances ADD COLUMN IF NOT EXISTS member_deleted BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE terms_acceptances ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE terms_acceptances ALTER COLUMN member_id DROP NOT NULL`);
   await pool.query(`
     INSERT INTO terms_acceptances(member_id, terms_version, accepted_at)
     SELECT m.id, m.terms_version, m.terms_accepted_at
@@ -1236,6 +1257,28 @@ await pool.query(`
     hash
   ]);
 }
+
+async function logMemberChange({ member, action, oldStatus, newStatus, oldAdmin, newAdmin, changedBy }) {
+  if (!member) return;
+  await pool.query(
+    `INSERT INTO member_status_log(
+       member_id, member_name, member_email, action,
+       old_status, new_status, old_admin, new_admin, changed_by
+     ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      member.id || null,
+      member.name || null,
+      member.email || null,
+      action,
+      oldStatus ?? null,
+      newStatus ?? null,
+      oldAdmin ?? null,
+      newAdmin ?? null,
+      changedBy || null
+    ]
+  );
+}
+
 
 
 app.get("/", (req, res) => {
@@ -1394,7 +1437,7 @@ app.get("/register", (req, res) => {
           dein Konto freischalten.
         </p>
 
-        <form method="post" action="/register">
+        <form method="post" action="/register" onsubmit="return confirm('Benutzer wirklich entsperren?');">
 
           <label>Name</label>
 
@@ -1593,7 +1636,7 @@ app.get("/terms/accept", (req, res) => {
     <div class="card">
       <h1>Nutzungsbedingungen</h1>
       <p>Bitte lies die vollständigen <a href="/terms" target="_blank">Nutzungsbedingungen</a>. Erst nach deiner aktiven Zustimmung kannst du dich anmelden.</p>
-      <form method="post" action="/terms/accept">
+      <form method="post" action="/terms/accept" onsubmit="return confirm('Benutzer wirklich freigeben?');">
         <input type="hidden" name="email" value="${esc(email)}">
         <label style="display:flex;align-items:flex-start;gap:8px">
           <input type="checkbox" name="accept_terms" value="yes" style="width:auto;margin-top:4px" required>
@@ -1643,9 +1686,13 @@ app.post("/terms/accept", async (req, res) => {
 app.get("/admin/terms", adminRequired, async (req, res) => {
   try {
     const acceptedResult = await pool.query(`
-      SELECT m.name, m.email, m.status, a.terms_version, a.accepted_at
+      SELECT
+        COALESCE(m.name, a.member_name, 'Benutzer gelöscht') AS name,
+        COALESCE(m.email, a.member_email, '') AS email,
+        CASE WHEN a.member_deleted THEN 'gelöscht' ELSE COALESCE(m.status, 'unbekannt') END AS status,
+        a.terms_version, a.accepted_at
       FROM terms_acceptances a
-      JOIN members m ON m.id = a.member_id
+      LEFT JOIN members m ON m.id = a.member_id
       ORDER BY a.accepted_at DESC
     `);
 
@@ -1732,7 +1779,7 @@ app.get("/login", (req, res) => {
 
         <h2>Mitglieder-Login</h2>
 
-        <form method="post" action="/login">
+        <form method="post" action="/login" onsubmit="return confirm('Wirklich Administratorrechte vergeben?');">
 
           <label>E-Mail</label>
 
@@ -1935,7 +1982,7 @@ app.get("/password", loginRequired, (req, res) => {
       </div>
 
       <div class="card">
-        <form method="post" action="/password">
+        <form method="post" action="/password" onsubmit="return confirm('Benutzer wirklich endgültig löschen? Der Benutzer muss sich danach neu registrieren.');">
           <label>Aktuelles Passwort</label>
           <input type="password" name="current_password" minlength="8" required>
 
@@ -3220,31 +3267,38 @@ app.get("/admin", adminRequired, async (req, res) => {
       if (member.admin) {
         statusAction = member.id === req.session.member.id
           ? '<span class="badge ok">Du bist Admin</span>'
-          : `<form method="post" action="/admin/remove-admin/${member.id}" style="display:inline">
+          : `<form method="post" action="/admin/remove-admin/${member.id}" style="display:inline" onsubmit="return confirm('Wirklich Administratorrechte entfernen?');">
                <button class="btn danger" type="submit">Admin entfernen</button>
              </form>`;
       } else if (member.status === "pending") {
         statusAction =
-          `<form method="post" action="/admin/approve/${member.id}" style="display:inline">
+          `<form method="post" action="/admin/approve/${member.id}" style="display:inline" onsubmit="return confirm('Benutzer wirklich freigeben?');">
              <button class="btn" type="submit">Freigeben</button>
            </form>`;
       } else if (member.status === "approved") {
         statusAction =
-          `<form method="post" action="/admin/block/${member.id}" style="display:inline">
+          `<form method="post" action="/admin/block/${member.id}" style="display:inline" onsubmit="return confirm('Benutzer wirklich sperren? Der Benutzer wird sofort abgemeldet und kann sich nicht mehr anmelden.');">
              <button class="btn danger" type="submit">Sperren</button>
            </form>`;
       } else {
         statusAction =
           `<span class="badge error">Gesperrt</span>
-           <form method="post" action="/admin/approve/${member.id}" style="display:inline">
+           <form method="post" action="/admin/approve/${member.id}" style="display:inline" onsubmit="return confirm('Benutzer wirklich freigeben?');">
              <button class="btn secondary" type="submit">Entsperren</button>
            </form>`;
       }
 
       const adminAction = member.admin
         ? ""
-        : `<form method="post" action="/admin/make-admin/${member.id}" style="display:inline">
+        : `<form method="post" action="/admin/make-admin/${member.id}" style="display:inline" onsubmit="return confirm('Wirklich Administratorrechte vergeben?');">
              <button class="btn secondary" type="submit">Zum Admin machen</button>
+           </form>`;
+
+      const deleteAction = member.admin
+        ? ""
+        : `<form method="post" action="/admin/delete-member/${member.id}" style="display:inline"
+                onsubmit="return confirm('Benutzer wirklich endgültig löschen? Der Benutzer muss sich danach neu registrieren.');">
+             <button class="btn danger" type="submit">Löschen</button>
            </form>`;
 
       return `
@@ -3256,6 +3310,7 @@ app.get("/admin", adminRequired, async (req, res) => {
             <div class="actions" style="margin-top:0">
               ${statusAction}
               ${adminAction}
+              ${deleteAction}
             </div>
           </td>
         </tr>
@@ -3294,7 +3349,7 @@ app.get("/admin", adminRequired, async (req, res) => {
           <td>${esc(recurrenceLabel(block))}</td>
           <td>${esc(block.reason || "Reserviert")}</td>
           <td>
-            <form method="post" action="/admin/block/delete/${block.id}">
+            <form method="post" action="/admin/block/delete/${block.id}" onsubmit="return confirm('Benutzer wirklich sperren? Der Benutzer wird sofort abgemeldet und kann sich nicht mehr anmelden.');">
               <button class="btn danger" type="submit">Entfernen</button>
             </form>
           </td>
@@ -3651,191 +3706,121 @@ app.post("/admin/create-member", adminRequired, async (req, res) => {
 });
 
 
-app.post(
-  "/admin/approve/:id",
-  adminRequired,
-  async (req, res) => {
-
-    try {
-
-      const count =
-        await pool.query(
-
-          "SELECT COUNT(*)::int AS n FROM members WHERE status='approved'"
-
-        );
-
-
-      if (
-        count.rows[0].n >= 100
-      ) {
-
-        return res.status(409).send(
-
-          page(
-
-            "Admin",
-
-            `
-            <div class="card warn">
-
-              <h2>
-                100 Mitglieder erreicht
-              </h2>
-
-              <p>
-                Es können keine weiteren
-                Mitglieder freigeschaltet werden.
-              </p>
-
-            </div>
-            `,
-
-            req
-
-          )
-
-        );
-
-      }
-
-
-      await pool.query(
-
-        "UPDATE members SET status='approved' WHERE id=$1 AND admin=FALSE",
-
-        [
-          req.params.id
-        ]
-
-      );
-
-
-      res.redirect("/admin");
-
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).send(
-        "Serverfehler"
-      );
-
-    }
-
-  }
-);
-
-
-app.post("/admin/make-admin/:id", adminRequired, async (req, res) => {
+app.post("/admin/approve/:id", adminRequired, async (req, res) => {
   try {
-    if (String(req.params.id) === String(req.session.member.id)) {
-      return res.redirect("/admin");
+    const targetId = Number(req.params.id);
+    const before = await pool.query(
+      "SELECT id,name,email,status,admin FROM members WHERE id=$1 AND admin=FALSE",
+      [targetId]
+    );
+    if (!before.rowCount) return res.redirect("/admin");
+    const member = before.rows[0];
+
+    if (member.status !== "approved") {
+      const count = await pool.query(
+        "SELECT COUNT(*)::int AS n FROM members WHERE status='approved' AND admin=FALSE"
+      );
+      if (count.rows[0].n >= 100) return res.status(409).send("100 Mitglieder erreicht");
     }
 
     await pool.query(
-      `UPDATE members
-          SET admin=TRUE, status='approved'
-        WHERE id=$1`,
-      [req.params.id]
+      "UPDATE members SET status='approved', session_version=session_version+1 WHERE id=$1",
+      [targetId]
     );
 
+    await logMemberChange({
+      member, action: member.status === "blocked" ? "unblocked" : "approved",
+      oldStatus: member.status, newStatus: "approved",
+      oldAdmin: member.admin, newAdmin: member.admin,
+      changedBy: Number(req.session.member.id)
+    });
     res.redirect("/admin");
   } catch (error) {
-    console.error(error);
+    console.error("Fehler Statusänderung:", error);
     res.status(500).send("Serverfehler");
   }
 });
 
+app.post("/admin/make-admin/:id", adminRequired, async (req, res) => {
+  try {
+    const targetId = Number(req.params.id);
+    if (!Number.isInteger(targetId) || targetId === Number(req.session.member.id)) return res.redirect("/admin");
+    const before = await pool.query("SELECT id,name,email,status,admin FROM members WHERE id=$1",[targetId]);
+    if (!before.rowCount) return res.redirect("/admin");
+    const member = before.rows[0];
+
+    await pool.query(
+      "UPDATE members SET admin=TRUE, status='approved', session_version=session_version+1 WHERE id=$1",
+      [targetId]
+    );
+    await logMemberChange({
+      member, action:"made_admin", oldStatus:member.status, newStatus:"approved",
+      oldAdmin:member.admin, newAdmin:true, changedBy:Number(req.session.member.id)
+    });
+    res.redirect("/admin");
+  } catch (error) {
+    console.error(error); res.status(500).send("Serverfehler");
+  }
+});
 
 app.post("/admin/remove-admin/:id", adminRequired, async (req, res) => {
   try {
     const targetId = Number(req.params.id);
+    if (!Number.isInteger(targetId) || targetId === Number(req.session.member.id)) return res.redirect("/admin");
+    const before = await pool.query("SELECT id,name,email,status,admin FROM members WHERE id=$1",[targetId]);
+    if (!before.rowCount) return res.redirect("/admin");
+    const member=before.rows[0];
+    if (!member.admin) return res.redirect("/admin");
+    const count=await pool.query("SELECT COUNT(*)::int AS n FROM members WHERE admin=TRUE");
+    if (count.rows[0].n<=1) return res.status(400).send("Letzter Administrator kann nicht entfernt werden.");
 
-    if (!Number.isInteger(targetId)) {
-      return res.redirect("/admin");
-    }
-
-    if (targetId === Number(req.session.member.id)) {
-      return res.status(400).send(page(
-        "Administration",
-        nav(req) + `
-          <div class="card warn">
-            <h2>Adminrechte nicht entfernt</h2>
-            <p>Du kannst dir deine eigenen Adminrechte nicht selbst entziehen.</p>
-            <a class="btn" href="/admin">Zurück zur Administration</a>
-          </div>
-        `,
-        req
-      ));
-    }
-
-    const count = await pool.query(
-      "SELECT COUNT(*)::int AS n FROM members WHERE admin=TRUE"
-    );
-
-    if (count.rows[0].n <= 1) {
-      return res.status(400).send(page(
-        "Administration",
-        nav(req) + `
-          <div class="card warn">
-            <h2>Letzter Administrator</h2>
-            <p>Der letzte Administrator kann nicht entfernt werden.</p>
-            <a class="btn" href="/admin">Zurück zur Administration</a>
-          </div>
-        `,
-        req
-      ));
-    }
-
-    await pool.query(
-      "UPDATE members SET admin=FALSE, session_version=session_version+1 WHERE id=$1",
-      [targetId]
-    );
-
+    await pool.query("UPDATE members SET admin=FALSE, session_version=session_version+1 WHERE id=$1",[targetId]);
+    await logMemberChange({
+      member, action:"removed_admin", oldStatus:member.status, newStatus:member.status,
+      oldAdmin:true,newAdmin:false,changedBy:Number(req.session.member.id)
+    });
     res.redirect("/admin");
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Serverfehler");
-  }
+  } catch(error){console.error(error);res.status(500).send("Serverfehler");}
 });
 
+app.post("/admin/delete-member/:id", adminRequired, async (req,res)=>{
+  const targetId=Number(req.params.id);
+  if (!Number.isInteger(targetId)||targetId<=0||targetId===Number(req.session.member.id)) return res.status(400).send("Benutzer kann nicht gelöscht werden.");
+  try{
+    const r=await pool.query("SELECT id,name,email,status,admin FROM members WHERE id=$1",[targetId]);
+    if(!r.rowCount) return res.redirect("/admin");
+    const member=r.rows[0];
+    if(member.admin) return res.status(400).send("Administratorkonten können hier nicht gelöscht werden.");
 
-app.post(
-  "/admin/block/:id",
-  adminRequired,
-  async (req, res) => {
+    await pool.query(
+      `UPDATE terms_acceptances
+       SET member_id=NULL, member_name=$2, member_email=$3, member_deleted=TRUE, deleted_at=NOW()
+       WHERE member_id=$1`,
+      [targetId,member.name,member.email]
+    );
+    await logMemberChange({
+      member,action:"deleted",oldStatus:member.status,newStatus:"deleted",
+      oldAdmin:false,newAdmin:false,changedBy:Number(req.session.member.id)
+    });
+    await pool.query("DELETE FROM members WHERE id=$1",[targetId]);
+    res.redirect("/admin");
+  }catch(error){console.error("Fehler beim Löschen:",error);res.status(500).send("Serverfehler");}
+});
 
-    try {
-
-      await pool.query(
-
-        "UPDATE members SET status='blocked', session_version=session_version+1 WHERE id=$1 AND admin=FALSE",
-
-        [
-          req.params.id
-        ]
-
-      );
-
-
-      res.redirect("/admin");
-
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).send(
-        "Serverfehler"
-      );
-
-    }
-
-  }
-);
-
+app.post("/admin/block/:id", adminRequired, async (req,res)=>{
+  try{
+    const targetId=Number(req.params.id);
+    const r=await pool.query("SELECT id,name,email,status,admin FROM members WHERE id=$1 AND admin=FALSE",[targetId]);
+    if(!r.rowCount) return res.redirect("/admin");
+    const member=r.rows[0];
+    await pool.query("UPDATE members SET status='blocked', session_version=session_version+1 WHERE id=$1",[targetId]);
+    await logMemberChange({
+      member,action:"blocked",oldStatus:member.status,newStatus:"blocked",
+      oldAdmin:false,newAdmin:false,changedBy:Number(req.session.member.id)
+    });
+    res.redirect("/admin");
+  }catch(error){console.error("Fehler Sperrung:",error);res.status(500).send("Serverfehler");}
+});
 
 app.post(
   "/admin/cancel-booking/:id",
