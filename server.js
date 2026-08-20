@@ -839,7 +839,8 @@ function nav(req) {
     <a class="${active("/", true)}" href="/">Startseite</a>
     <a class="${active("/booking")}" href="/booking">Platz buchen</a>
     <a class="${active("/my-bookings")}" href="/my-bookings">Meine Buchungen</a>
-    <a class="${active("/password")}" href="/password">Passwort ändern</a>
+    <a class="${active("/password")}" href="/profile">Profil</a>
+        <a href="/password">Passwort ändern</a>
     ${req.session.member.admin
       ? `<a class="${active("/admin")}" href="/admin">Administration</a>`
       : ""}
@@ -1787,6 +1788,38 @@ app.post("/logout", (req, res) => {
 
   });
 
+});
+
+
+app.get("/profile", requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, name, email, alias, is_admin, terms_accepted_at, terms_version FROM members WHERE id=$1",
+      [req.session.userId]
+    );
+    const member = result.rows[0];
+    if (!member) return res.redirect("/logout");
+
+    res.send(page("Mein Profil", `
+      <div class="card">
+        <h1>Mein Profil</h1>
+        <p><strong>Name:</strong> ${esc(member.name || "")}</p>
+        <p><strong>E-Mail:</strong> ${esc(member.email || "")}</p>
+        <p><strong>Alias:</strong> ${member.alias ? esc(member.alias) : '<span class="muted">Kein Alias hinterlegt</span>'}</p>
+        <p><strong>Rolle:</strong> ${member.is_admin ? "Administrator" : "Benutzer"}</p>
+        <hr>
+        <h2>Nutzungsbedingungen</h2>
+        <p>Hier kannst du die aktuell gültigen Nutzungsbedingungen jederzeit vollständig lesen.</p>
+        <div class="actions">
+          <a class="btn" href="/terms">Nutzungsbedingungen lesen</a>
+          <a class="btn secondary" href="/password">Passwort ändern</a>
+          <a class="btn secondary" href="/booking">Zur Buchung</a>
+        </div>
+      </div>`, req));
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Serverfehler");
+  }
 });
 
 app.get("/password", loginRequired, (req, res) => {
