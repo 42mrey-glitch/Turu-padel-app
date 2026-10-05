@@ -1,0 +1,16 @@
+{
+  "name": "TuRU 1880 Düsseldorf",
+  "short_name": "TuRU 1880",
+  "description": "TuRU 1880 Düsseldorf – Vereinsplattform",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f5f8fb",
+  "theme_color": "#0756a6",
+  "icons": [
+    {"src":"/turu-logo-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"/turu-logo-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}
