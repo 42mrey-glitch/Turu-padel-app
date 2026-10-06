@@ -4327,11 +4327,15 @@ app.get("/admin", adminRequired, async (req, res) => {
              <button class="btn secondary" type="submit">Zum Admin machen</button>
            </form>`;
 
+      const passwordAction = member.admin
+        ? ""
+        : `<a class="btn secondary" href="/admin/member/${member.id}/password">🔑 Passwort ändern</a>`;
+
       const deleteAction = member.admin
         ? ""
         : `<form method="post" action="/admin/delete-member/${member.id}" style="display:inline"
                 onsubmit="return confirm('Benutzer wirklich endgültig löschen? Der Benutzer muss sich danach neu registrieren.');">
-             <button class="btn danger" type="submit">Löschen</button>
+             <button class="btn danger" type="submit">🗑️ Löschen</button>
            </form>`;
 
       return `
@@ -4343,6 +4347,7 @@ app.get("/admin", adminRequired, async (req, res) => {
             <div class="actions" style="margin-top:0">
               ${statusAction}
               ${adminAction}
+              ${passwordAction}
               ${deleteAction}
             </div>
           </td>
@@ -5161,6 +5166,103 @@ app.post("/admin/remove-admin/:id", adminRequired, async (req, res) => {
     });
     res.redirect("/admin");
   } catch(error){console.error(error);res.status(500).send("Serverfehler");}
+});
+
+app.get("/admin/member/:id/password", adminRequired, async (req, res) => {
+  try {
+    const targetId = Number(req.params.id);
+    if (!Number.isInteger(targetId) || targetId <= 0) return res.redirect("/admin");
+
+    const result = await pool.query(
+      "SELECT id,name,email,admin,status FROM members WHERE id=$1",
+      [targetId]
+    );
+    if (!result.rowCount) return res.redirect("/admin");
+
+    const member = result.rows[0];
+    if (member.admin) {
+      return res.status(400).send(page("Nicht möglich", nav(req) + `
+        <div class="card error">
+          <h2>Passwort nicht geändert</h2>
+          <p>Das Passwort eines Administrator-Kontos kann hier nicht über die Mitgliederverwaltung geändert werden.</p>
+          <div class="actions"><a class="btn secondary" href="/admin">Zur Administration</a></div>
+        </div>
+      `, req));
+    }
+
+    res.send(page("Passwort ändern", nav(req) + `
+      <div class="card" style="max-width:650px">
+        <h2>🔑 Passwort für Mitglied ändern</h2>
+        <p><b>${esc(member.name)}</b><br><span class="muted">${esc(member.email)}</span></p>
+        <div class="notice">Das bisherige Passwort wird nicht benötigt. Der Administrator legt ein neues Startpasswort fest.</div>
+        <form method="post" action="/admin/member/${member.id}/password">
+          <label>Neues Passwort</label>
+          <input type="password" name="password" minlength="8" maxlength="200" autocomplete="new-password" required>
+          <label>Neues Passwort wiederholen</label>
+          <input type="password" name="confirm" minlength="8" maxlength="200" autocomplete="new-password" required>
+          <div class="actions">
+            <button class="btn" type="submit" onclick="return confirm('Passwort für dieses Mitglied wirklich ändern?');">Passwort speichern</button>
+            <a class="btn secondary" href="/admin">Abbrechen</a>
+          </div>
+        </form>
+      </div>
+    `, req));
+  } catch (error) {
+    console.error("Fehler Passwort-Formular:", error);
+    res.status(500).send("Serverfehler");
+  }
+});
+
+app.post("/admin/member/:id/password", adminRequired, async (req, res) => {
+  try {
+    const targetId = Number(req.params.id);
+    const password = String(req.body.password || "");
+    const confirmPassword = String(req.body.confirm || "");
+
+    if (!Number.isInteger(targetId) || targetId <= 0) return res.redirect("/admin");
+    if (password.length < 8) {
+      return res.status(400).send(page("Passwort ändern", nav(req) + `
+        <div class="card error"><h2>Passwort zu kurz</h2><p>Das neue Passwort muss mindestens 8 Zeichen enthalten.</p><div class="actions"><a class="btn secondary" href="/admin/member/${targetId}/password">Zurück</a></div></div>
+      `, req));
+    }
+    if (password !== confirmPassword) {
+      return res.status(400).send(page("Passwort ändern", nav(req) + `
+        <div class="card error"><h2>Passwörter stimmen nicht überein</h2><p>Bitte beide Felder identisch ausfüllen.</p><div class="actions"><a class="btn secondary" href="/admin/member/${targetId}/password">Zurück</a></div></div>
+      `, req));
+    }
+
+    const result = await pool.query(
+      "SELECT id,name,email,admin,status FROM members WHERE id=$1",
+      [targetId]
+    );
+    if (!result.rowCount) return res.redirect("/admin");
+    const member = result.rows[0];
+
+    if (member.admin) {
+      return res.status(400).send("Administrator-Passwörter können hier nicht geändert werden.");
+    }
+
+    const hash = await bcrypt.hash(password, 12);
+    await pool.query(
+      "UPDATE members SET password_hash=$1, session_version=session_version+1 WHERE id=$2",
+      [hash, targetId]
+    );
+
+    // Alle bestehenden Sitzungen des Mitglieds ungültig machen.
+    await destroyMemberSessions(targetId);
+
+    res.send(page("Passwort geändert", nav(req) + `
+      <div class="card ok">
+        <h2>✓ Passwort erfolgreich geändert</h2>
+        <p>Das Passwort für <b>${esc(member.name)}</b> wurde geändert.</p>
+        <p class="muted">Das Mitglied muss sich mit dem neuen Passwort erneut anmelden.</p>
+        <div class="actions"><a class="btn" href="/admin">Zur Administration</a></div>
+      </div>
+    `, req));
+  } catch (error) {
+    console.error("Fehler beim Ändern des Mitglied-Passworts:", error);
+    res.status(500).send("Serverfehler");
+  }
 });
 
 app.post("/admin/delete-member/:id", adminRequired, async (req,res)=>{
