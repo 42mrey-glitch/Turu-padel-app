@@ -53,7 +53,7 @@ app.use(session({
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 1000 * 60 * 60 * 24 * 365
+    maxAge: 1000 * 60 * 30
   }
 }));
 
@@ -248,7 +248,6 @@ a:hover{
   vertical-align:middle;
 }
 .message-badge.visible{display:inline-block;}
-.nav-disabled{opacity:.55;cursor:not-allowed;padding:10px 12px;display:inline-flex;align-items:center;}
 
 main{
   max-width:1120px;
@@ -951,9 +950,7 @@ function nav(req) {
 
   return `<nav class="nav">
     <a class="${active("/", true)}" href="/">Startseite</a>
-    ${req.session.member.admin || !req.session.member.hasActiveBooking
-      ? `<a class="${active("/booking")}" href="/booking">🎾 Platz buchen</a>`
-      : `<span class="nav-disabled" title="Du hast bereits eine aktive Buchung">🎾 Platz buchen (bereits gebucht)</span>`}
+    <a class="${active("/booking")}" href="/booking">Platz buchen</a>
     <a class="${active("/my-bookings")}" href="/my-bookings">Meine Buchungen</a>
     <a class="${active("/password")}" href="/password">Passwort ändern</a>
     ${req.session.member.admin
@@ -967,36 +964,34 @@ function nav(req) {
   </nav>`;
 }
 
+const INACTIVITY_TIMEOUT_MS = 1000 * 60 * 30;
+
+async function destroyMemberSessions(memberId) {
+  await pool.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%\"id\":${Number(memberId)}%`]);
+}
+
+function touchSession(req) {
+  if (req.session) req.session.lastActivity = Date.now();
+}
+
 function loginRequired(req, res, next) {
   if (!req.session.member) return res.redirect("/login");
-
-  // Keine automatische Abmeldung wegen Inaktivität.
-  // Der Login bleibt bestehen, solange der Nutzer sich nicht selbst abmeldet
-  // oder der Administrator den Account sperrt/löscht bzw. die Session-Version ändert.
+  const last = Number(req.session.lastActivity || Date.now());
+  if (Date.now() - last > INACTIVITY_TIMEOUT_MS) {
+    return req.session.destroy(() => res.redirect("/login?reason=inactive"));
+  }
   pool.query("SELECT id,name,email,status,admin,session_version FROM members WHERE id=$1", [req.session.member.id])
     .then(result => {
       const member = result.rows[0];
-
-      // Admin-Statusänderungen, Sperrungen und andere sicherheitsrelevante
-      // Änderungen erhöhen session_version. Dadurch wird eine bestehende
-      // Anmeldung beim nächsten Zugriff sofort ungültig.
       if (!member || member.status !== "approved" || Number(req.session.sessionVersion || 1) !== Number(member.session_version || 1)) {
         return req.session.destroy(() => res.redirect("/login?reason=changed"));
       }
-
-      req.session.member = {
-        id: member.id,
-        name: member.name,
-        email: member.email,
-        admin: member.admin
-      };
+      req.session.member = { id: member.id, name: member.name, email: member.email, admin: member.admin };
       req.session.sessionVersion = Number(member.session_version || 1);
+      touchSession(req);
       next();
     })
-    .catch(error => {
-      console.error(error);
-      res.status(500).send("Serverfehler");
-    });
+    .catch(error => { console.error(error); res.status(500).send("Serverfehler"); });
 }
 
 function adminRequired(req, res, next) {
@@ -1035,25 +1030,6 @@ function normalizeYmd(value) {
   const raw = String(value || "").trim();
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? match[0] : "";
-}
-
-function isAdultBirthDate(value) {
-  const birth = dateFromYmd(value);
-  const today = dateFromYmd(berlinDate());
-  if (Number.isNaN(birth.getTime()) || Number.isNaN(today.getTime())) return false;
-  if (birth > today) return false;
-  let age = today.getUTCFullYear() - birth.getUTCFullYear();
-  const birthdayPassed =
-    today.getUTCMonth() > birth.getUTCMonth() ||
-    (today.getUTCMonth() === birth.getUTCMonth() && today.getUTCDate() >= birth.getUTCDate());
-  if (!birthdayPassed) age--;
-  return age >= 18;
-}
-
-function adultCutoffYmd() {
-  const today = dateFromYmd(berlinDate());
-  today.setUTCFullYear(today.getUTCFullYear() - 18);
-  return ymd(today);
 }
 
 function dateFromYmd(value) {
@@ -1257,31 +1233,9 @@ function maskIban(value = "") {
   return `${iban.slice(0, 4)} **** **** ${iban.slice(-4)}`;
 }
 
-function isValidIban(value = "") {
+function isPlausibleIban(value = "") {
   const iban = normalizeIban(value);
-  const lengths = {
-    AL:28, AD:24, AT:20, AZ:28, BH:22, BE:16, BA:20, BR:29, BG:22, CR:22,
-    HR:21, CY:28, CZ:24, DK:18, DO:28, EE:20, FO:18, FI:18, FR:27, GE:22,
-    DE:22, GI:23, GR:27, GL:18, GT:28, HU:28, IS:26, IE:22, IL:23, IT:27,
-    JO:30, KZ:20, KW:30, LV:21, LB:28, LI:21, LT:20, LU:20, MT:31, MR:27,
-    MU:30, MC:27, MD:24, ME:22, NL:18, MK:19, NO:15, PK:24, PL:28, PT:25,
-    QA:29, RO:24, SM:27, SA:24, RS:22, SK:24, SI:19, ES:24, SE:24, CH:21,
-    TN:24, TR:26, UA:29, AE:23, GB:22, VA:22
-  };
-  if (!/^[A-Z]{2}[0-9A-Z]+$/.test(iban)) return false;
-  if (lengths[iban.slice(0,2)] !== iban.length) return false;
-  const rearranged = iban.slice(4) + iban.slice(0,4);
-  let remainder = 0;
-  for (const ch of rearranged) {
-    const value = ch >= "A" && ch <= "Z" ? String(ch.charCodeAt(0) - 55) : ch;
-    for (const digit of String(value)) remainder = (remainder * 10 + Number(digit)) % 97;
-  }
-  return remainder === 1;
-}
-
-function isValidSignature(value = "") {
-  const signature = String(value || "");
-  return /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(signature) && signature.length <= 600000;
+  return /^[A-Z]{2}[0-9A-Z]{13,32}$/.test(iban);
 }
 
 function addMonthsYmd(startYmd, months) {
@@ -1311,7 +1265,6 @@ async function initDb() {
     );
   `);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS alias TEXT`);
-  await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS birth_date DATE`);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP`);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS terms_version TEXT`);
   await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1`);
@@ -1389,8 +1342,6 @@ async function initDb() {
       sepa_accepted_at TIMESTAMP,
       application_accepted BOOLEAN NOT NULL DEFAULT FALSE,
       application_accepted_at TIMESTAMP,
-      signature_data TEXT,
-      signature_created_at TIMESTAMP,
       notes TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -1402,33 +1353,6 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_membership_applications_status
     ON membership_applications(status, created_at DESC);
   `);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS signature_data TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS signature_created_at TIMESTAMP`);
-  // Kompatibilität mit älteren Datenbankständen: fehlende Antragsspalten nachrüsten.
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS first_name TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS last_name TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS street TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS house_number TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS postal_code TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS city TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS birth_date DATE`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS email TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS phone TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS plan TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS amount_cents INTEGER`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS billing_interval TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS iban_masked TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS iban_full TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS account_holder TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS sepa_accepted BOOLEAN DEFAULT FALSE`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS sepa_accepted_at TIMESTAMP`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS application_accepted BOOLEAN DEFAULT FALSE`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS application_accepted_at TIMESTAMP`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS notes TEXT`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
-  await pool.query(`ALTER TABLE membership_applications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
-
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_membership_applications_email
     ON membership_applications(email);
@@ -1462,14 +1386,6 @@ async function initDb() {
       message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
       member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
       read_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      PRIMARY KEY(message_id, member_id)
-    );
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS message_deletions(
-      message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
-      member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
-      deleted_at TIMESTAMP NOT NULL DEFAULT NOW(),
       PRIMARY KEY(message_id, member_id)
     );
   `);
@@ -1567,22 +1483,7 @@ async function logMemberChange({ member, action, oldStatus, newStatus, oldAdmin,
 
 
 
-app.get("/", async (req, res) => {
-
-  if (req.session.member) {
-    try {
-      const active = await pool.query(
-        `SELECT id FROM bookings
-         WHERE member_id=$1 AND used=FALSE
-           AND (booking_date + end_time) > NOW()
-         LIMIT 1`,
-        [req.session.member.id]
-      );
-      req.session.member.hasActiveBooking = active.rowCount > 0;
-    } catch (error) {
-      console.error("Fehler Buchungsstatus Startseite:", error);
-    }
-  }
+app.get("/", (req, res) => {
 
   const content = req.session.member
 
@@ -1598,9 +1499,9 @@ app.get("/", async (req, res) => {
 
         <div class="actions">
 
-          ${req.session.member.hasActiveBooking
-            ? `<span class="nav-disabled">🎾 Platz buchen (bereits gebucht)</span>`
-            : `<a class="btn" href="/booking">🎾 Platz buchen</a>`}
+          <a class="btn" href="/booking">
+            🎾 Platz buchen
+          </a>
 
           <a class="btn secondary" href="/my-bookings">
             Meine Buchungen
@@ -1672,35 +1573,6 @@ app.get("/", async (req, res) => {
   );
 });
 
-
-app.get("/info", (req, res) => {
-  res.send(page("Info – Padelplätze", `
-    <div class="card">
-      <h1>ℹ️ Padelplätze & Buchungen</h1>
-
-      <h2>🎾 TuRU-Platz für Mitglieder</h2>
-      <p>
-        TuRU 1880 Düsseldorf verfügt über <b>einen eigenen Padelplatz für Mitglieder</b>.
-        TuRU-Mitglieder können auf diesem Platz die verfügbaren <b>Zeitslots direkt über die
-        TuRU-Padel-App reservieren</b>.
-      </p>
-
-      <h2>🎾 Weitere Padelplätze</h2>
-      <p>
-        Alle weiteren Padelplätze können über <b>PadelCity</b> gebucht werden.
-        Dafür ist eine separate <b>Registrierung bei PadelCity</b> erforderlich.
-      </p>
-
-      <div class="card" style="background:var(--blue-light);margin-top:18px">
-        <p><b>Kurz zusammengefasst:</b></p>
-        <p>🎾 <b>1 Platz:</b> exklusiv für TuRU-Mitglieder</p>
-        <p>📅 <b>Reservierung:</b> direkt über die TuRU-Padel-App</p>
-        <p>🎾 <b>Weitere Plätze:</b> Buchung über PadelCity</p>
-        <p>👤 <b>PadelCity:</b> separate Registrierung erforderlich</p>
-      </div>
-    </div>
-  `, req));
-});
 
 app.get("/terms", (req, res) => {
   res.send(page("Nutzungsbedingungen", `
@@ -1777,13 +1649,7 @@ app.get("/membership", (req, res) => {
           <div><label>Hausnummer</label><input type="text" name="house_number" maxlength="20" required></div>
           <div><label>PLZ</label><input type="text" name="postal_code" maxlength="12" required></div>
           <div><label>Ort</label><input type="text" name="city" maxlength="100" required></div>
-          <div>
-            <label>Geburtsdatum</label>
-            <input id="membershipBirthDate" type="date" name="birth_date" required max="${adultCutoffYmd()}">
-            <div id="minorWarning" class="alert" style="display:none;margin-top:8px">
-              ⚠️ Minderjährige können keinen Mitgliedsantrag abschließen. Der Antrag ist erst ab 18 Jahren möglich.
-            </div>
-          </div>
+          <div><label>Geburtsdatum</label><input type="date" name="birth_date" required></div>
           <div><label>Telefon</label><input type="tel" name="phone" maxlength="50"></div>
           <div><label>E-Mail</label><input type="email" name="email" maxlength="200" required></div>
         </div>
@@ -1806,13 +1672,7 @@ app.get("/membership", (req, res) => {
         <p class="muted">Die Belastung erfolgt erst nach Annahme des Mitgliedsantrags und nach Maßgabe eurer SEPA-Informationen.</p>
         <div class="grid">
           <div><label>Kontoinhaber</label><input type="text" name="account_holder" maxlength="150" required></div>
-          <div>
-            <label>IBAN</label>
-            <input id="membershipIban" type="text" name="iban" autocomplete="off" maxlength="40" required>
-            <div id="ibanWarning" class="alert" style="display:none;margin-top:8px">
-              ⚠️ Bitte überprüfe deine IBAN. Die eingegebene IBAN ist ungültig.
-            </div>
-          </div>
+          <div><label>IBAN</label><input type="text" name="iban" autocomplete="off" maxlength="40" required></div>
         </div>
 
         <label style="display:flex;gap:10px;align-items:flex-start;margin-top:16px">
@@ -1825,100 +1685,10 @@ app.get("/membership", (req, res) => {
           <span>Ich bestätige die Angaben und beantrage die gewählte Mitgliedschaft zu den oben beschriebenen Konditionen.</span>
         </label>
 
-        <h3>✍️ Unterschrift</h3>
-        <p class="muted">Bitte unterschreibe mit dem Finger bzw. mit der Maus. Die Unterschrift ist ein Pflichtfeld.</p>
-        <div style="border:1px solid #cfd8e3;border-radius:10px;background:#fff;max-width:650px">
-          <canvas id="signaturePad" width="650" height="220" style="width:100%;height:220px;display:block;touch-action:none"></canvas>
-        </div>
-        <input type="hidden" name="signature_data" id="signatureData">
-        <div class="actions" style="margin-top:8px">
-          <button class="btn secondary" type="button" id="clearSignature">Unterschrift löschen</button>
-          <span id="signatureHint" class="muted">Noch keine Unterschrift</span>
-        </div>
-
         <div class="actions">
-          <button id="membershipSubmit" class="btn" type="submit">Mitgliedsantrag absenden</button>
+          <button class="btn" type="submit">Mitgliedsantrag absenden</button>
         </div>
       </form>
-      <script>
-        (() => {
-          const input = document.getElementById("membershipBirthDate");
-          const warning = document.getElementById("minorWarning");
-          const button = document.getElementById("membershipSubmit");
-          const form = button.closest("form");
-          const cutoff = "${adultCutoffYmd()}";
-          function checkAge() {
-            const minor = !input.value || input.value > cutoff;
-            warning.style.display = input.value && minor ? "block" : "none";
-            button.disabled = !!(input.value && minor);
-          }
-          input.addEventListener("change", checkAge);
-          input.addEventListener("input", checkAge);
-          checkAge();
-
-          const ibanInput = document.getElementById("membershipIban");
-          const ibanWarning = document.getElementById("ibanWarning");
-          function checkIban() {
-            const iban = String(ibanInput.value || "").replace(/\s+/g, "").toUpperCase();
-            if (!iban) {
-              ibanWarning.style.display = "none";
-              return false;
-            }
-            const lengths = {DE:22};
-            let valid = /^[A-Z]{2}[0-9A-Z]+$/.test(iban) && lengths[iban.slice(0,2)] === iban.length;
-            if (valid) {
-              const rearranged = iban.slice(4) + iban.slice(0,4);
-              let remainder = 0;
-              for (const ch of rearranged) {
-                const value = ch >= "A" && ch <= "Z" ? String(ch.charCodeAt(0) - 55) : ch;
-                for (const digit of String(value)) remainder = (remainder * 10 + Number(digit)) % 97;
-              }
-              valid = remainder === 1;
-            }
-            ibanWarning.style.display = valid ? "none" : "block";
-            return valid;
-          }
-          ibanInput.addEventListener("input", checkIban);
-          ibanInput.addEventListener("blur", checkIban);
-
-          const canvas = document.getElementById("signaturePad");
-          const hidden = document.getElementById("signatureData");
-          const hint = document.getElementById("signatureHint");
-          const clear = document.getElementById("clearSignature");
-          const ctx = canvas.getContext("2d");
-          ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
-          let drawing = false;
-          function point(e) {
-            const r = canvas.getBoundingClientRect();
-            return {x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height};
-          }
-          canvas.addEventListener("pointerdown", e => {
-            e.preventDefault(); drawing=true; canvas.setPointerCapture?.(e.pointerId);
-            const p=point(e); ctx.beginPath(); ctx.moveTo(p.x,p.y);
-          });
-          canvas.addEventListener("pointermove", e => {
-            if(!drawing)return; e.preventDefault();
-            const p=point(e); ctx.lineTo(p.x,p.y); ctx.stroke();
-            hidden.value=canvas.toDataURL("image/png"); hint.textContent="Unterschrift vorhanden ✓";
-          });
-          canvas.addEventListener("pointerup",()=>drawing=false);
-          canvas.addEventListener("pointercancel",()=>drawing=false);
-          clear.addEventListener("click",()=>{ctx.clearRect(0,0,canvas.width,canvas.height);hidden.value="";hint.textContent="Noch keine Unterschrift";});
-          form.addEventListener("submit",e=>{
-            if(!checkIban()){
-              e.preventDefault();
-              ibanInput.focus();
-              ibanInput.scrollIntoView({behavior:"smooth",block:"center"});
-              return;
-            }
-            if(!hidden.value){
-              e.preventDefault();
-              alert("Bitte unterschreibe den Mitgliedsantrag.");
-              canvas.scrollIntoView({behavior:"smooth",block:"center"});
-            }
-          });
-        })();
-      </script>
     </div>
   `, req));
 });
@@ -1939,89 +1709,31 @@ app.post("/membership/apply", async (req, res) => {
     const iban = normalizeIban(req.body.iban || "");
     const sepaAccepted = req.body.sepa_accepted === "1";
     const applicationAccepted = req.body.application_accepted === "1";
-    const signatureData = String(req.body.signature_data || "");
 
-    if (!isValidIban(iban)) {
-      return res.status(400).send(page("Mitgliedsantrag", `
-        <div class="card warn">
-          <h2>⚠️ IBAN bitte überprüfen</h2>
-          <p>Die eingegebene IBAN ist ungültig. Bitte überprüfe die IBAN und versuche es erneut.</p>
-          <a class="btn" href="/membership">Zurück zum Antrag</a>
-        </div>
-      `, req));
-    }
-
-    const validationErrors = [];
-    if (!firstName) validationErrors.push("Vorname fehlt.");
-    if (!lastName) validationErrors.push("Nachname fehlt.");
-    if (!street) validationErrors.push("Straße fehlt.");
-    if (!houseNumber) validationErrors.push("Hausnummer fehlt.");
-    if (!postalCode) validationErrors.push("PLZ fehlt.");
-    if (!city) validationErrors.push("Ort fehlt.");
-    if (!birthDate) validationErrors.push("Geburtsdatum fehlt oder ist ungültig.");
-    if (!email) validationErrors.push("E-Mail-Adresse fehlt.");
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) validationErrors.push("E-Mail-Adresse ist ungültig.");
-    if (!["monthly", "annual"].includes(plan)) validationErrors.push("Bitte wähle eine Mitgliedschaft aus.");
-    if (!accountHolder) validationErrors.push("Kontoinhaber fehlt.");
-    if (!sepaAccepted) validationErrors.push("Die SEPA-Ermächtigung muss bestätigt werden.");
-    if (!applicationAccepted) validationErrors.push("Die Bestätigung des Mitgliedsantrags muss akzeptiert werden.");
-    if (!isValidSignature(signatureData)) validationErrors.push("Die Unterschrift fehlt oder ist ungültig.");
-
-    if (validationErrors.length) {
+    if (!firstName || !lastName || !street || !houseNumber || !postalCode || !city ||
+        !birthDate || !email || !["monthly", "annual"].includes(plan) ||
+        !accountHolder || !isPlausibleIban(iban) || !sepaAccepted || !applicationAccepted) {
       return res.status(400).send(page("Mitgliedsantrag", `
         <div class="card error">
-          <h2>⚠️ Bitte Angaben prüfen</h2>
-          <p>Folgende Angaben sind noch nicht korrekt:</p>
-          <ul style="margin:12px 0 18px;padding-left:22px">
-            ${validationErrors.map(error => `<li style="margin:7px 0">${esc(error)}</li>`).join("")}
-          </ul>
+          <h2>Antrag unvollständig</h2>
+          <p>Bitte fülle alle Pflichtfelder korrekt aus und bestätige beide Erklärungen.</p>
           <a class="btn" href="/membership">Zurück zum Antrag</a>
-        </div>
-      `, req));
-    }
-
-    if (!isAdultBirthDate(birthDate)) {
-      return res.status(400).send(page("Mitgliedsantrag", `
-        <div class="card error">
-          <h2>Mitgliedsantrag nicht möglich</h2>
-          <p>⚠️ Minderjährige können keinen Mitgliedsantrag abschließen. Eine Mitgliedschaft kann erst ab 18 Jahren beantragt werden.</p>
-          <a class="btn secondary" href="/membership">Zurück zum Antrag</a>
         </div>
       `, req));
     }
 
     const duplicate = await pool.query(
-      `SELECT id, first_name, last_name, email, status
-       FROM membership_applications
-       WHERE status IN ('pending','approved')
-         AND (lower(trim(email)) = lower(trim($1))
-              OR (lower(trim(first_name)) = lower(trim($2))
-                  AND lower(trim(last_name)) = lower(trim($3))))
-       ORDER BY created_at DESC
+      `SELECT id FROM membership_applications
+       WHERE email=$1 AND status IN ('pending','approved')
        LIMIT 1`,
-      [email, firstName, lastName]
+      [email]
     );
     if (duplicate.rowCount) {
-      const existing = duplicate.rows[0];
-      const sameEmail = String(existing.email || '').trim().toLowerCase() === email;
-      const sameName = String(existing.first_name || '').trim().toLowerCase() === firstName.toLowerCase()
-        && String(existing.last_name || '').trim().toLowerCase() === lastName.toLowerCase();
-
-      let reason = '';
-      if (sameEmail && sameName) {
-        reason = 'Für diese E-Mail-Adresse und diesen Namen wurde bereits ein Mitgliedsantrag eingereicht.';
-      } else if (sameEmail) {
-        reason = 'Für diese E-Mail-Adresse wurde bereits ein Mitgliedsantrag eingereicht.';
-      } else {
-        reason = 'Für diesen Vor- und Nachnamen wurde bereits ein Mitgliedsantrag eingereicht.';
-      }
-
       return res.status(409).send(page("Mitgliedsantrag", `
         <div class="card warn">
-          <h2>⚠️ Antrag bereits vorhanden</h2>
-          <p>${esc(reason)}</p>
-          <p>Bitte prüfe deine Angaben. Ein zweiter Antrag mit derselben E-Mail-Adresse oder demselben Namen ist nicht möglich.</p>
-          <a class="btn" href="/membership">Zurück zum Antrag</a>
+          <h2>Antrag bereits vorhanden</h2>
+          <p>Für diese E-Mail-Adresse gibt es bereits einen offenen oder angenommenen Mitgliedsantrag.</p>
+          <a class="btn" href="/membership">Zurück</a>
         </div>
       `, req));
     }
@@ -2034,15 +1746,14 @@ app.post("/membership/apply", async (req, res) => {
         first_name,last_name,street,house_number,postal_code,city,birth_date,
         email,phone,plan,amount_cents,billing_interval,
         iban_masked,iban_full,account_holder,
-        sepa_accepted,sepa_accepted_at,application_accepted,application_accepted_at,
-        signature_data,signature_created_at
+        sepa_accepted,sepa_accepted_at,application_accepted,application_accepted_at
       ) VALUES(
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,TRUE,NOW(),TRUE,NOW(),$16,NOW()
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,TRUE,NOW(),TRUE,NOW()
       )`,
       [
         firstName,lastName,street,houseNumber,postalCode,city,birthDate,
         email,phone || null,plan,amountCents,interval,
-        maskIban(iban),iban,accountHolder,signatureData
+        maskIban(iban),iban,accountHolder
       ]
     );
 
@@ -2056,14 +1767,7 @@ app.post("/membership/apply", async (req, res) => {
     `, req));
   } catch (error) {
     console.error("Fehler Mitgliedsantrag:", error);
-    res.status(500).send(page("Mitgliedsantrag", `
-      <div class="card error">
-        <h2>⚠️ Technischer Fehler</h2>
-        <p>Der Antrag konnte technisch gerade nicht gespeichert werden.</p>
-        <p>Bitte versuche es später erneut. Deine Eingaben wurden nicht als Antrag gespeichert.</p>
-        <a class="btn" href="/membership">Zurück zum Antrag</a>
-      </div>
-    `, req));
+    res.status(500).send("Serverfehler");
   }
 });
 
@@ -2117,7 +1821,7 @@ app.get("/register", (req, res) => {
       `
       <div class="card">
 
-        <h2>Mitglied registrieren</h2>
+        <h2>Mitgliedsantrag</h2>
 
         <p class="muted">
           Nach der Registrierung muss der Administrator
@@ -2142,15 +1846,6 @@ app.get("/register", (req, res) => {
             maxlength="200"
             required
           >
-
-          <label>Geburtsdatum</label>
-          <input
-            type="date"
-            name="birth_date"
-            required
-            max="${adultCutoffYmd()}"
-          >
-          <p class="muted">Die Registrierung ist nur ab 18 Jahren möglich.</p>
 
           <label>Passwort</label>
           <input type="password" name="password" minlength="8" required>
@@ -2202,33 +1897,26 @@ app.post("/register", async (req, res) => {
 
     const password = String(req.body.password || "");
     const confirmPassword = String(req.body.confirm_password || "");
-    const birthDate = normalizeYmd(req.body.birth_date);
     const alias = String(req.body.alias || "").trim();
     const acceptTerms = req.body.accept_terms === "yes";
 
-    let registrationError = "";
-    if (!name || !email || !birthDate || !password || !confirmPassword) {
-      registrationError = "Bitte fülle alle Pflichtfelder aus.";
-    } else if (password.length < 8) {
-      registrationError = "Das Passwort muss mindestens 8 Zeichen lang sein.";
-    } else if (password !== confirmPassword) {
-      registrationError = "Die Passwörter stimmen nicht überein.";
-    } else if (!isAdultBirthDate(birthDate)) {
-      registrationError = "Du bist minderjährig. Ein Mitgliedsantrag kann erst ab 18 Jahren abgeschlossen werden.";
-    } else if (!acceptTerms) {
-      registrationError = "Bitte akzeptiere die Nutzungsbedingungen.";
-    }
+    if (!name || !email || password.length < 8 || password !== confirmPassword || !acceptTerms) {
 
-    if (registrationError) {
-      return res.status(400).send(page(
-        "Registrierung",
-        `<div class="card error">
-          <h2>Registrierung nicht möglich</h2>
-          <p>${esc(registrationError)}</p>
-          <div class="actions"><a class="btn secondary" href="/register">Zurück zur Registrierung</a></div>
-        </div>`,
-        req
-      ));
+      return res.status(400).send(
+
+        page(
+          "Fehler",
+
+          nav(req) +
+
+          '<div class="card error">' +
+          '<h2>Fehler</h2>' +
+          '<p>Bitte alle Angaben ausfüllen, Passwort bestätigen und die Nutzungsbedingungen akzeptieren.</p>' +
+          '</div>',
+
+          req
+        )
+      );
     }
 
 
@@ -2290,8 +1978,8 @@ app.post("/register", async (req, res) => {
 
     const result = await pool.query(
 
-      "INSERT INTO members(name,email,password_hash,status,alias,birth_date,terms_accepted_at,terms_version) VALUES($1,$2,$3,'pending',$4,$5,NOW(),$6) RETURNING id",
-      [name, email, hash, alias || null, birthDate, TERMS_VERSION]
+      "INSERT INTO members(name,email,password_hash,status,alias,terms_accepted_at,terms_version) VALUES($1,$2,$3,'pending',$4,NOW(),$5) RETURNING id",
+      [name, email, hash, alias || null, TERMS_VERSION]
 
     );
 
@@ -2642,21 +2330,11 @@ app.post("/login", async (req, res) => {
 
       email: member.email,
 
-      admin: member.admin,
-      hasActiveBooking: false
+      admin: member.admin
+
     };
-
-    const loginBooking = await pool.query(
-      `SELECT id FROM bookings
-       WHERE member_id=$1
-         AND used=FALSE
-         AND (booking_date + end_time) > NOW()
-       LIMIT 1`,
-      [member.id]
-    );
-    req.session.member.hasActiveBooking = loginBooking.rowCount > 0;
-
     req.session.sessionVersion = Number(member.session_version || 1);
+    req.session.lastActivity = Date.now();
 
 
     res.redirect("/");
@@ -2672,6 +2350,7 @@ app.post("/login", async (req, res) => {
 });
 
 
+app.get("/logout-inactive", (req, res) => { req.session.destroy(() => res.redirect("/login?reason=inactive")); });
 
 app.post("/logout", (req, res) => {
 
@@ -3123,18 +2802,6 @@ async function renderMonthCalendar(date, req) {
 
 app.get("/booking", loginRequired, async (req, res) => {
   try {
-    if (!req.session.member.admin && req.session.member.hasActiveBooking) {
-      return res.send(page("Platz buchen", `
-        <div class="card warn">
-          <h2>🎾 Du hast bereits eine aktive Buchung</h2>
-          <p>Solange diese Buchung aktiv ist, kannst du keine weitere Buchung vornehmen.</p>
-          <div class="actions">
-            <a class="btn secondary" href="/my-bookings">Meine Buchungen</a>
-          </div>
-        </div>
-      `, req));
-    }
-
     const view = ["day", "week", "month"].includes(String(req.query.view || ""))
       ? String(req.query.view)
       : "day";
@@ -3555,9 +3222,12 @@ app.post("/book", loginRequired, async (req, res) => {
               Meine Buchungen
             </a>
 
-            ${req.session.member.admin
-              ? `<a class="btn secondary" href="/booking">Weitere Zeiten</a>`
-              : `<span class="nav-disabled">Weitere Buchung erst nach Ablauf</span>`}
+            <a
+              class="btn secondary"
+              href="/booking"
+            >
+              Weitere Zeiten
+            </a>
 
           </div>
 
@@ -3997,10 +3667,7 @@ app.get("/api/messages/unread-count", loginRequired, async (req, res) => {
        FROM messages m
        LEFT JOIN message_reads mr
          ON mr.message_id=m.id AND mr.member_id=$1
-       LEFT JOIN message_deletions md
-         ON md.message_id=m.id AND md.member_id=$1
        WHERE mr.message_id IS NULL
-         AND md.message_id IS NULL
          AND (
            m.recipient_type='all'
            OR (m.recipient_type='member' AND m.recipient_member_id=$1)
@@ -4019,76 +3686,25 @@ app.get("/messages", loginRequired, async (req, res) => {
   try {
     const member = req.session.member;
     const result = await pool.query(
-      `SELECT m.*, mr.read_at, s.name AS sender_name
+      `SELECT m.*, mr.read_at
        FROM messages m
-       LEFT JOIN members s ON s.id=m.sender_id
        LEFT JOIN message_reads mr ON mr.message_id=m.id AND mr.member_id=$1
-       LEFT JOIN message_deletions md ON md.message_id=m.id AND md.member_id=$1
-       WHERE md.message_id IS NULL
-         AND (m.recipient_type='all'
+       WHERE m.recipient_type='all'
           OR (m.recipient_type='member' AND m.recipient_member_id=$1)
-          OR (m.recipient_type='admins' AND $2::boolean=TRUE))
+          OR (m.recipient_type='admins' AND $2::boolean=TRUE)
        ORDER BY m.created_at DESC`,
       [member.id, !!member.admin]
     );
     const rows = result.rows.map(m => `
       <div class="card">
         <h2>${esc(m.title)}</h2>
-        <p class="muted">Von: ${esc(m.sender_name || "TuRU 1880")} · Gesendet: ${esc(String(m.created_at))}${m.read_at ? ` · Gelesen: ${esc(String(m.read_at))}` : ' · <b>Neu</b>'}</p>
+        <p class="muted">Gesendet: ${esc(String(m.created_at))}${m.read_at ? ` · Gelesen: ${esc(String(m.read_at))}` : ' · <b>Neu</b>'}</p>
         <p style="white-space:pre-wrap">${esc(m.body)}</p>
-        <div class="actions">
-          ${!m.read_at ? `<form method="post" action="/messages/${m.id}/read"><button class="btn" type="submit">Als gelesen markieren</button></form>` : ''}
-          <form method="post" action="/messages/${m.id}/delete" onsubmit="return confirm('Nachricht wirklich löschen?');">
-            <button class="btn secondary" type="submit">🗑️ Löschen</button>
-          </form>
-        </div>
+        ${!m.read_at ? `<form method="post" action="/messages/${m.id}/read"><button class="btn" type="submit">Als gelesen markieren</button></form>` : ''}
       </div>`).join("");
-    res.send(page("Nachrichten", `
-      <div class="hero"><h1>💬 Nachrichten</h1><p>Deine Nachrichten von TuRU 1880.</p>
-        <div class="actions"><a class="btn" href="/messages/new">✉️ Nachricht an Admin</a></div>
-      </div>
-      ${req.query.sent ? '<div class="card ok"><p>✓ Deine Nachricht wurde an die Administratoren gesendet.</p></div>' : ''}
-      ${rows || '<div class="card">Keine Nachrichten vorhanden.</div>'}`, req));
+    res.send(page("Nachrichten", `<div class="hero"><h1>💬 Nachrichten</h1><p>Deine Nachrichten von TuRU 1880.</p></div>${rows || '<div class="card">Keine Nachrichten vorhanden.</div>'}`, req));
   } catch (error) {
     console.error("Fehler Nachrichten:", error);
-    res.status(500).send("Serverfehler");
-  }
-});
-
-app.post("/messages/:id/delete", loginRequired, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const member = req.session.member;
-
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).send("Ungültige Nachricht.");
-    }
-
-    const visible = await pool.query(
-      `SELECT 1 FROM messages
-       WHERE id=$1
-         AND (
-           recipient_type='all'
-           OR (recipient_type='member' AND recipient_member_id=$2)
-           OR (recipient_type='admins' AND $3::boolean=TRUE)
-         )`,
-      [id, member.id, !!member.admin]
-    );
-
-    if (!visible.rowCount) {
-      return res.status(404).send("Nachricht nicht gefunden.");
-    }
-
-    await pool.query(
-      `INSERT INTO message_deletions(message_id,member_id)
-       VALUES($1,$2)
-       ON CONFLICT(message_id,member_id) DO NOTHING`,
-      [id, member.id]
-    );
-
-    res.redirect("/messages");
-  } catch (error) {
-    console.error("Fehler persönliche Nachricht löschen:", error);
     res.status(500).send("Serverfehler");
   }
 });
@@ -4107,73 +3723,20 @@ app.post("/messages/:id/read", loginRequired, async (req, res) => {
   }
 });
 
-app.get("/messages/new", loginRequired, async (req, res) => {
-  res.send(page("Nachricht an Admin", `
-    <div class="hero"><h1>✉️ Nachricht an den Admin</h1><p>Du kannst hier direkt eine Nachricht an die TuRU 1880 Administratoren senden.</p></div>
-    <div class="card">
-      <form method="post" action="/messages/to-admin">
-        <label>Titel</label>
-        <input name="title" maxlength="200" required>
-        <label>Nachricht</label>
-        <textarea name="body" rows="8" maxlength="5000" required></textarea>
-        <div class="actions">
-          <button class="btn" type="submit">Nachricht senden</button>
-          <a class="btn secondary" href="/messages">Zurück</a>
-        </div>
-      </form>
-    </div>
-  `, req));
-});
-
-app.post("/messages/to-admin", loginRequired, async (req, res) => {
-  try {
-    const title = String(req.body.title || "").trim();
-    const body = String(req.body.body || "").trim();
-    if (!title || !body) {
-      return res.status(400).send(page("Nachricht", `
-        <div class="card error"><h2>Nachricht unvollständig</h2><p>Bitte Titel und Nachricht ausfüllen.</p><a class="btn secondary" href="/messages/new">Zurück</a></div>
-      `, req));
-    }
-
-    await pool.query(
-      `INSERT INTO messages(sender_id,title,body,recipient_type,recipient_member_id)
-       VALUES($1,$2,$3,'admins',NULL)`,
-      [req.session.member.id, title, body]
-    );
-
-    const admins = await pool.query(
-      "SELECT id FROM members WHERE status='approved' AND admin=TRUE"
-    );
-    await sendPushToMembers(admins.rows.map(r => r.id), title, body);
-
-    res.redirect("/messages?sent=1");
-  } catch (error) {
-    console.error("Fehler Nachricht an Admin:", error);
-    res.status(500).send("Serverfehler");
-  }
-});
-
 app.get("/admin/messages", adminRequired, async (req, res) => {
   try {
     const [messagesResult, membersResult] = await Promise.all([
-      pool.query(`SELECT m.*, s.name AS sender_name, s.email AS sender_email, COUNT(mr.member_id)::int AS read_count
-                  FROM messages m
-                  LEFT JOIN members s ON s.id=m.sender_id
-                  LEFT JOIN message_reads mr ON mr.message_id=m.id
-                  GROUP BY m.id, s.name, s.email ORDER BY m.created_at DESC`),
+      pool.query(`SELECT m.*, COUNT(mr.member_id)::int AS read_count
+                  FROM messages m LEFT JOIN message_reads mr ON mr.message_id=m.id
+                  GROUP BY m.id ORDER BY m.created_at DESC`),
       pool.query(`SELECT id,name,email FROM members WHERE status='approved' ORDER BY name,email`)
     ]);
     const options = membersResult.rows.map(m => `<option value="${m.id}">${esc(m.name)} (${esc(m.email)})</option>`).join("");
     const rows = messagesResult.rows.map(m => `<tr>
-      <td><b>${esc(m.title)}</b><br><span class="muted">Von: ${esc(m.sender_name || "System")} · ${esc(String(m.created_at))}</span></td>
+      <td><b>${esc(m.title)}</b><br><span class="muted">${esc(String(m.created_at))}</span></td>
       <td>${m.recipient_type==='all'?'Alle Nutzer':m.recipient_type==='admins'?'Administratoren':'Einzelner Nutzer'}</td>
       <td>${m.read_count}</td>
-      <td><div class="actions">
-        <a class="btn" href="/admin/messages/${m.id}/reads">Lesestatus</a>
-        <form method="post" action="/admin/messages/${m.id}/delete" onsubmit="return confirm('Nachricht wirklich endgültig löschen?');">
-          <button class="btn secondary" type="submit">🗑️ Löschen</button>
-        </form>
-      </div></td></tr>`).join("");
+      <td><a class="btn" href="/admin/messages/${m.id}/reads">Lesestatus</a></td></tr>`).join("");
     res.send(page("Kommunikation", `
       <div class="hero"><h1>📣 Kommunikations-Zentrale</h1><p>Nachrichten senden und Lesestatus prüfen.</p></div>
       <div class="card"><h2>Neue Nachricht</h2>
@@ -4211,19 +3774,6 @@ app.post("/admin/messages/send", adminRequired, async (req, res) => {
     await sendPushToMembers(recipientRows.rows.map(r => r.id), title, body);
     res.redirect("/admin/messages");
   } catch(error) { console.error(error); res.status(500).send("Serverfehler"); }
-});
-
-app.post("/admin/messages/:id/delete", adminRequired, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).send("Ungültige Nachricht.");
-    const result = await pool.query("DELETE FROM messages WHERE id=$1 RETURNING id", [id]);
-    if (!result.rowCount) return res.status(404).send("Nachricht nicht gefunden.");
-    res.redirect("/admin/messages");
-  } catch (error) {
-    console.error("Fehler Admin-Nachricht löschen:", error);
-    res.status(500).send("Serverfehler");
-  }
 });
 
 app.get("/admin/messages/:id/reads", adminRequired, async (req,res)=>{
@@ -4327,15 +3877,11 @@ app.get("/admin", adminRequired, async (req, res) => {
              <button class="btn secondary" type="submit">Zum Admin machen</button>
            </form>`;
 
-      const passwordAction = member.admin
-        ? ""
-        : `<a class="btn secondary" href="/admin/member/${member.id}/password">🔑 Passwort ändern</a>`;
-
       const deleteAction = member.admin
         ? ""
         : `<form method="post" action="/admin/delete-member/${member.id}" style="display:inline"
                 onsubmit="return confirm('Benutzer wirklich endgültig löschen? Der Benutzer muss sich danach neu registrieren.');">
-             <button class="btn danger" type="submit">🗑️ Löschen</button>
+             <button class="btn danger" type="submit">Löschen</button>
            </form>`;
 
       return `
@@ -4347,7 +3893,6 @@ app.get("/admin", adminRequired, async (req, res) => {
             <div class="actions" style="margin-top:0">
               ${statusAction}
               ${adminAction}
-              ${passwordAction}
               ${deleteAction}
             </div>
           </td>
@@ -4388,26 +3933,9 @@ app.get("/admin", adminRequired, async (req, res) => {
         rejected: '<span class="badge error">Abgelehnt</span>',
         cancelled: '<span class="badge">Gekündigt</span>'
       };
-      const forwardSubject = encodeURIComponent(`Mitgliedsantrag – ${application.first_name} ${application.last_name}`);
-      const forwardBody = encodeURIComponent(
-        `Mitgliedsantrag von ${application.first_name} ${application.last_name}\n` +
-        `E-Mail: ${application.email}\n` +
-        `Telefon: ${application.phone || "–"}\n` +
-        `Adresse: ${application.street} ${application.house_number}, ${application.postal_code} ${application.city}\n` +
-        `Geburtsdatum: ${normalizeYmd(application.birth_date)}\n` +
-        `Tarif: ${planLabel}\n` +
-        `Kontoinhaber: ${application.account_holder}\n` +
-        `IBAN: ${application.iban_masked}\n` +
-        `Antrag eingegangen: ${normalizeYmd(application.created_at)}`
-      );
-      let actions = `
-        <div class="actions" style="margin-bottom:8px">
-          <a class="btn secondary" href="/admin/membership/${application.id}/view">👁️ Öffnen</a>
-          <a class="btn secondary" href="/admin/membership/${application.id}/view?print=1" target="_blank">🖨️ PDF/Drucken</a>
-          <a class="btn secondary" href="mailto:?subject=${forwardSubject}&body=${forwardBody}">✉️ Weiterleiten</a>
-        </div>`;
+      let actions = "";
       if (application.status === "pending") {
-        actions += `
+        actions = `
           <form method="post" action="/admin/membership/${application.id}/approve" style="display:inline" onsubmit="return confirm('Mitgliedsantrag wirklich annehmen?');">
             <button class="btn" type="submit">Annehmen</button>
           </form>
@@ -4415,16 +3943,11 @@ app.get("/admin", adminRequired, async (req, res) => {
             <button class="btn danger" type="submit">Ablehnen</button>
           </form>`;
       } else if (application.status === "approved") {
-        actions += `
+        actions = `
           <form method="post" action="/membership/cancel/${application.id}" style="display:inline" onsubmit="return confirm('Mitgliedschaft wirklich kündigen? Das Wirksamkeitsdatum wird nach dem gewählten Tarif berechnet.');">
             <button class="btn danger" type="submit">Kündigen</button>
           </form>`;
       }
-
-      actions += `
-        <form method="post" action="/admin/membership/${application.id}/delete" style="display:inline" onsubmit="return confirm('Mitgliedsantrag wirklich endgültig löschen? Diese Aktion kann nicht rückgängig gemacht werden.');">
-          <button class="btn danger" type="submit">🗑️ Löschen</button>
-        </form>`;
       return `
         <tr>
           <td><b>${esc(application.first_name)} ${esc(application.last_name)}</b><br><span class="muted">${esc(application.email)} · ${esc(application.phone || "–")}</span></td>
@@ -4723,203 +4246,6 @@ app.post("/admin/block/delete/:id", adminRequired, async (req, res) => {
 
 
 
-app.post("/admin/membership/:id/iban", adminRequired, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({ ok: false, error: "Ungültiger Mitgliedsantrag." });
-    }
-
-    const result = await pool.query(
-      "SELECT iban_full FROM membership_applications WHERE id=$1",
-      [id]
-    );
-
-    if (!result.rowCount) {
-      return res.status(404).json({ ok: false, error: "Mitgliedsantrag nicht gefunden." });
-    }
-
-    const iban = normalizeIban(result.rows[0].iban_full || "");
-    if (!iban) {
-      return res.status(404).json({ ok: false, error: "Keine IBAN hinterlegt." });
-    }
-
-    res.json({ ok: true, iban });
-  } catch (error) {
-    console.error("Fehler beim Anzeigen der IBAN:", error);
-    res.status(500).json({ ok: false, error: "IBAN konnte nicht geladen werden." });
-  }
-});
-
-app.get("/admin/membership/:id/view", adminRequired, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).send("Ungültiger Mitgliedsantrag.");
-    }
-
-    const result = await pool.query(
-      `SELECT *
-       FROM membership_applications
-       WHERE id=$1`,
-      [id]
-    );
-
-    if (!result.rowCount) {
-      return res.status(404).send("Mitgliedsantrag nicht gefunden.");
-    }
-
-    const a = result.rows[0];
-    const planLabel = a.plan === "annual" ? "Jährlich – 250 €" : "Monatlich – 25 €";
-    const statusLabels = {
-      pending: "Beantragt",
-      approved: "Angenommen",
-      rejected: "Abgelehnt",
-      cancelled: "Gekündigt"
-    };
-
-    const printMode = req.query.print === "1";
-    const mailSubject = encodeURIComponent(`Mitgliedsantrag – ${a.first_name} ${a.last_name}`);
-    const mailBody = encodeURIComponent(
-      `Mitgliedsantrag von ${a.first_name} ${a.last_name}\n` +
-      `E-Mail: ${a.email}\nTelefon: ${a.phone || "–"}\n` +
-      `Adresse: ${a.street} ${a.house_number}, ${a.postal_code} ${a.city}\n` +
-      `Geburtsdatum: ${normalizeYmd(a.birth_date)}\n` +
-      `Tarif: ${planLabel}\n` +
-      `Kontoinhaber: ${a.account_holder}\nIBAN: ${a.iban_masked}\n` +
-      `Antrag eingegangen: ${normalizeYmd(a.created_at)}`
-    );
-
-    res.send(page("Mitgliedsantrag", `
-      <div class="card membership-detail ${printMode ? "print-mode" : ""}">
-        <div class="actions no-print">
-          <a class="btn secondary" href="/admin">← Zurück</a>
-          <button class="btn" type="button" onclick="window.print()">🖨️ Als PDF speichern / Drucken</button>
-          <a class="btn secondary" href="mailto:?subject=${mailSubject}&body=${mailBody}">✉️ Weiterleiten</a>
-        </div>
-
-        <h1>📝 Mitgliedsantrag</h1>
-        <p class="muted">Antragsnummer: ${a.id} · Eingegangen: ${esc(normalizeYmd(a.created_at))}</p>
-
-        <h2>Persönliche Daten</h2>
-        <table>
-          <tr><th>Vorname</th><td>${esc(a.first_name)}</td></tr>
-          <tr><th>Nachname</th><td>${esc(a.last_name)}</td></tr>
-          <tr><th>Geburtsdatum</th><td>${esc(normalizeYmd(a.birth_date))}</td></tr>
-          <tr><th>E-Mail</th><td>${esc(a.email)}</td></tr>
-          <tr><th>Telefon</th><td>${esc(a.phone || "–")}</td></tr>
-        </table>
-
-        <h2>Adresse</h2>
-        <table>
-          <tr><th>Straße</th><td>${esc(a.street)} ${esc(a.house_number)}</td></tr>
-          <tr><th>PLZ / Ort</th><td>${esc(a.postal_code)} ${esc(a.city)}</td></tr>
-        </table>
-
-        <h2>Mitgliedschaft</h2>
-        <table>
-          <tr><th>Tarif</th><td>${esc(planLabel)}</td></tr>
-          <tr><th>Status</th><td>${esc(statusLabels[a.status] || a.status)}</td></tr>
-          <tr><th>Mitgliedschaft ab</th><td>${a.membership_start ? esc(normalizeYmd(a.membership_start)) : "–"}</td></tr>
-          <tr><th>Mindestende</th><td>${a.minimum_end_date ? esc(normalizeYmd(a.minimum_end_date)) : "–"}</td></tr>
-          <tr><th>Kündigung wirksam</th><td>${a.cancellation_effective_date ? esc(normalizeYmd(a.cancellation_effective_date)) : "–"}</td></tr>
-        </table>
-
-        <h2>SEPA-Lastschrift</h2>
-        <table>
-          <tr><th>Kontoinhaber</th><td>${esc(a.account_holder)}</td></tr>
-          <tr><th>IBAN</th><td>
-            <span id="ibanMasked">${esc(a.iban_masked)}</span>
-            <span id="ibanFull" style="display:none;font-weight:700;letter-spacing:.4px"></span>
-            <div class="actions no-print" style="margin-top:8px">
-              <button class="btn secondary" type="button" id="showIbanBtn" onclick="showFullIban(${a.id})">👁️ IBAN anzeigen</button>
-              <button class="btn secondary" type="button" id="copyIbanBtn" onclick="copyFullIban()" style="display:none">📋 IBAN kopieren</button>
-            </div>
-            <div id="ibanError" class="muted" style="display:none;margin-top:6px"></div>
-          </td></tr>
-          <tr><th>SEPA akzeptiert</th><td>${a.sepa_accepted ? "Ja" : "Nein"}</td></tr>
-          <tr><th>Antrag akzeptiert</th><td>${a.application_accepted ? "Ja" : "Nein"}</td></tr>
-          <tr><th>Unterschrift</th><td>${a.signature_data ? `<img src="${a.signature_data}" alt="Digitale Unterschrift" style="max-width:420px;max-height:140px;border:1px solid #ddd;background:#fff">` : "Nicht vorhanden"}</td></tr>
-        </table>
-
-        ${a.notes ? `<h2>Notizen</h2><p style="white-space:pre-wrap">${esc(a.notes)}</p>` : ""}
-
-        <div class="actions no-print" style="margin-top:20px">
-          <a class="btn secondary" href="/admin">Zurück zur Administration</a>
-        </div>
-      </div>
-      <script>
-        let revealedIban = "";
-        async function showFullIban(id) {
-          const btn = document.getElementById("showIbanBtn");
-          const masked = document.getElementById("ibanMasked");
-          const full = document.getElementById("ibanFull");
-          const copyBtn = document.getElementById("copyIbanBtn");
-          const error = document.getElementById("ibanError");
-          btn.disabled = true;
-          error.style.display = "none";
-          try {
-            const response = await fetch("/admin/membership/" + id + "/iban", {
-              method: "POST",
-              headers: { "Accept": "application/json" }
-            });
-            const data = await response.json();
-            if (!response.ok || !data.ok) throw new Error(data.error || "IBAN konnte nicht geladen werden.");
-            revealedIban = data.iban;
-            masked.style.display = "none";
-            full.textContent = data.iban;
-            full.style.display = "inline";
-            copyBtn.style.display = "inline-block";
-            btn.textContent = "🙈 IBAN ausblenden";
-            btn.disabled = false;
-            btn.onclick = hideFullIban;
-          } catch (e) {
-            error.textContent = "⚠️ " + e.message;
-            error.style.display = "block";
-            btn.disabled = false;
-          }
-        }
-        function hideFullIban() {
-          document.getElementById("ibanMasked").style.display = "inline";
-          document.getElementById("ibanFull").style.display = "none";
-          document.getElementById("copyIbanBtn").style.display = "none";
-          const btn = document.getElementById("showIbanBtn");
-          btn.textContent = "👁️ IBAN anzeigen";
-          btn.onclick = () => showFullIban(${a.id});
-          revealedIban = "";
-        }
-        async function copyFullIban() {
-          if (!revealedIban) return;
-          try {
-            await navigator.clipboard.writeText(revealedIban);
-            const btn = document.getElementById("copyIbanBtn");
-            const old = btn.textContent;
-            btn.textContent = "✅ Kopiert";
-            setTimeout(() => btn.textContent = old, 1500);
-          } catch (e) {
-            const error = document.getElementById("ibanError");
-            error.textContent = "⚠️ Kopieren ist auf diesem Gerät nicht möglich. Bitte IBAN manuell markieren.";
-            error.style.display = "block";
-          }
-        }
-      </script>
-      <style>
-        .membership-detail table{width:100%;border-collapse:collapse;margin-bottom:20px}
-        .membership-detail th,.membership-detail td{padding:10px;border-bottom:1px solid #ddd;text-align:left}
-        .membership-detail th{width:220px;background:#f5f7fa}
-        @media print {
-          .no-print{display:none!important}
-          body{background:#fff!important}
-          .membership-detail{box-shadow:none!important;border:0!important}
-        }
-      </style>
-    `, req));
-  } catch (error) {
-    console.error("Fehler Mitgliedsantrag öffnen:", error);
-    res.status(500).send("Serverfehler");
-  }
-});
-
 app.post("/admin/membership/:id/approve", adminRequired, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -4965,32 +4291,6 @@ app.post("/admin/membership/:id/reject", adminRequired, async (req, res) => {
     res.status(500).send("Serverfehler");
   }
 });
-
-app.post("/admin/membership/:id/delete", adminRequired, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).send("Ungültiger Mitgliedsantrag.");
-    }
-
-    const result = await pool.query(
-      `DELETE FROM membership_applications
-       WHERE id=$1
-       RETURNING id`,
-      [id]
-    );
-
-    if (!result.rowCount) {
-      return res.status(404).send("Mitgliedsantrag nicht gefunden.");
-    }
-
-    res.redirect("/admin");
-  } catch (error) {
-    console.error("Fehler beim Löschen des Mitgliedsantrags:", error);
-    res.status(500).send("Mitgliedsantrag konnte nicht gelöscht werden.");
-  }
-});
-
 
 app.post("/admin/create-member", adminRequired, async (req, res) => {
   try {
@@ -5168,103 +4468,6 @@ app.post("/admin/remove-admin/:id", adminRequired, async (req, res) => {
   } catch(error){console.error(error);res.status(500).send("Serverfehler");}
 });
 
-app.get("/admin/member/:id/password", adminRequired, async (req, res) => {
-  try {
-    const targetId = Number(req.params.id);
-    if (!Number.isInteger(targetId) || targetId <= 0) return res.redirect("/admin");
-
-    const result = await pool.query(
-      "SELECT id,name,email,admin,status FROM members WHERE id=$1",
-      [targetId]
-    );
-    if (!result.rowCount) return res.redirect("/admin");
-
-    const member = result.rows[0];
-    if (member.admin) {
-      return res.status(400).send(page("Nicht möglich", nav(req) + `
-        <div class="card error">
-          <h2>Passwort nicht geändert</h2>
-          <p>Das Passwort eines Administrator-Kontos kann hier nicht über die Mitgliederverwaltung geändert werden.</p>
-          <div class="actions"><a class="btn secondary" href="/admin">Zur Administration</a></div>
-        </div>
-      `, req));
-    }
-
-    res.send(page("Passwort ändern", nav(req) + `
-      <div class="card" style="max-width:650px">
-        <h2>🔑 Passwort für Mitglied ändern</h2>
-        <p><b>${esc(member.name)}</b><br><span class="muted">${esc(member.email)}</span></p>
-        <div class="notice">Das bisherige Passwort wird nicht benötigt. Der Administrator legt ein neues Startpasswort fest.</div>
-        <form method="post" action="/admin/member/${member.id}/password">
-          <label>Neues Passwort</label>
-          <input type="password" name="password" minlength="8" maxlength="200" autocomplete="new-password" required>
-          <label>Neues Passwort wiederholen</label>
-          <input type="password" name="confirm" minlength="8" maxlength="200" autocomplete="new-password" required>
-          <div class="actions">
-            <button class="btn" type="submit" onclick="return confirm('Passwort für dieses Mitglied wirklich ändern?');">Passwort speichern</button>
-            <a class="btn secondary" href="/admin">Abbrechen</a>
-          </div>
-        </form>
-      </div>
-    `, req));
-  } catch (error) {
-    console.error("Fehler Passwort-Formular:", error);
-    res.status(500).send("Serverfehler");
-  }
-});
-
-app.post("/admin/member/:id/password", adminRequired, async (req, res) => {
-  try {
-    const targetId = Number(req.params.id);
-    const password = String(req.body.password || "");
-    const confirmPassword = String(req.body.confirm || "");
-
-    if (!Number.isInteger(targetId) || targetId <= 0) return res.redirect("/admin");
-    if (password.length < 8) {
-      return res.status(400).send(page("Passwort ändern", nav(req) + `
-        <div class="card error"><h2>Passwort zu kurz</h2><p>Das neue Passwort muss mindestens 8 Zeichen enthalten.</p><div class="actions"><a class="btn secondary" href="/admin/member/${targetId}/password">Zurück</a></div></div>
-      `, req));
-    }
-    if (password !== confirmPassword) {
-      return res.status(400).send(page("Passwort ändern", nav(req) + `
-        <div class="card error"><h2>Passwörter stimmen nicht überein</h2><p>Bitte beide Felder identisch ausfüllen.</p><div class="actions"><a class="btn secondary" href="/admin/member/${targetId}/password">Zurück</a></div></div>
-      `, req));
-    }
-
-    const result = await pool.query(
-      "SELECT id,name,email,admin,status FROM members WHERE id=$1",
-      [targetId]
-    );
-    if (!result.rowCount) return res.redirect("/admin");
-    const member = result.rows[0];
-
-    if (member.admin) {
-      return res.status(400).send("Administrator-Passwörter können hier nicht geändert werden.");
-    }
-
-    const hash = await bcrypt.hash(password, 12);
-    await pool.query(
-      "UPDATE members SET password_hash=$1, session_version=session_version+1 WHERE id=$2",
-      [hash, targetId]
-    );
-
-    // Alle bestehenden Sitzungen des Mitglieds ungültig machen.
-    await destroyMemberSessions(targetId);
-
-    res.send(page("Passwort geändert", nav(req) + `
-      <div class="card ok">
-        <h2>✓ Passwort erfolgreich geändert</h2>
-        <p>Das Passwort für <b>${esc(member.name)}</b> wurde geändert.</p>
-        <p class="muted">Das Mitglied muss sich mit dem neuen Passwort erneut anmelden.</p>
-        <div class="actions"><a class="btn" href="/admin">Zur Administration</a></div>
-      </div>
-    `, req));
-  } catch (error) {
-    console.error("Fehler beim Ändern des Mitglied-Passworts:", error);
-    res.status(500).send("Serverfehler");
-  }
-});
-
 app.post("/admin/delete-member/:id", adminRequired, async (req,res)=>{
   const targetId=Number(req.params.id);
   if (!Number.isInteger(targetId)||targetId<=0||targetId===Number(req.session.member.id)) return res.status(400).send("Benutzer kann nicht gelöscht werden.");
@@ -5296,8 +4499,6 @@ app.post("/admin/block/:id", adminRequired, async (req,res)=>{
     if(!r.rowCount) return res.redirect("/admin");
     const member=r.rows[0];
     await pool.query("UPDATE members SET status='blocked', session_version=session_version+1 WHERE id=$1",[targetId]);
-    // Gesperrte Mitglieder sollen keine weiteren Push-Nachrichten erhalten.
-    await pool.query("DELETE FROM push_subscriptions WHERE member_id=$1",[targetId]);
     await logMemberChange({
       member,action:"blocked",oldStatus:member.status,newStatus:"blocked",
       oldAdmin:false,newAdmin:false,changedBy:Number(req.session.member.id)
