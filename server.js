@@ -4125,13 +4125,22 @@ app.get("/admin", adminRequired, async (req, res) => {
       </div>
 
       <div class="grid">
-        
-      <div class="card">
-        <h2>📣 Kommunikation</h2>
-        <p>Nachrichten an alle Nutzer, Administratoren oder einzelne Benutzer senden und Lesestatus prüfen.</p>
-        <a class="btn" href="/admin/messages">Kommunikations-Zentrale öffnen</a>
-      </div>
-<div class="card"><h2>Mitglieder</h2><p><b>${approved}</b> freigeschaltet</p></div>
+        <div class="card">
+          <h2>📣 Kommunikation</h2>
+          <p>Nachrichten an alle Nutzer, Administratoren oder einzelne Benutzer senden und Lesestatus prüfen.</p>
+          <a class="btn" href="/admin/messages">Kommunikations-Zentrale öffnen</a>
+        </div>
+
+        <div class="card" style="border:2px solid #173f7a">
+          <h2>📝 Blanko-Mitgliedsantrag</h2>
+          <p>Die Vorlage bearbeiten, die zukünftige Mitglieder beim Online-Antrag ausfüllen.</p>
+          <div class="actions">
+            <a class="btn" href="/admin/membership-form">⚙️ Mitgliedsantrag bearbeiten</a>
+            <a class="btn secondary" href="/membership" target="_blank">👁️ Antrag ansehen</a>
+          </div>
+        </div>
+
+        <div class="card"><h2>Mitglieder</h2><p><b>${approved}</b> freigeschaltet</p></div>
         <div class="card"><h2>Wartend</h2><p><b>${pending}</b> Registrierungen</p></div>
         <div class="card"><h2>Administratoren</h2><p><b>${adminCount}</b></p></div>
         <div class="card"><h2>Buchungen</h2><p><b>${totalBookings}</b> insgesamt</p></div>
