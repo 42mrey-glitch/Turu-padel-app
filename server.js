@@ -19,15 +19,21 @@ if (PUSH_ENABLED) {
   console.warn("Push ist noch nicht aktiviert: VAPID_PUBLIC_KEY und VAPID_PRIVATE_KEY fehlen.");
 }
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 app.get("/turu-logo-v2.png", (req, res) => res.sendFile(__dirname + "/turu-logo-v2.png"));
 
 const PORT = process.env.PORT || 10000;
 const DATABASE_URL = process.env.DATABASE_URL;
+const SESSION_SECRET = process.env.SESSION_SECRET;
 
 if (!DATABASE_URL) {
   console.error("DATABASE_URL fehlt.");
+  process.exit(1);
+}
+
+if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
+  console.error("SESSION_SECRET fehlt oder ist zu kurz. Bitte in Render als geheime Umgebungsvariable setzen (mindestens 32 Zeichen).");
   process.exit(1);
 }
 
@@ -46,14 +52,14 @@ app.use(session({
     tableName: "user_sessions",
     createTableIfMissing: true
   }),
-  secret: process.env.SESSION_SECRET || "CHANGE_THIS_SESSION_SECRET",
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 1000 * 60 * 30
+    maxAge: 1000 * 60 * 60 * 24 * 365
   }
 }));
 
@@ -964,8 +970,6 @@ function nav(req) {
   </nav>`;
 }
 
-const INACTIVITY_TIMEOUT_MS = 1000 * 60 * 30;
-
 async function destroyMemberSessions(memberId) {
   await pool.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%\"id\":${Number(memberId)}%`]);
 }
@@ -976,10 +980,9 @@ function touchSession(req) {
 
 function loginRequired(req, res, next) {
   if (!req.session.member) return res.redirect("/login");
-  const last = Number(req.session.lastActivity || Date.now());
-  if (Date.now() - last > INACTIVITY_TIMEOUT_MS) {
-    return req.session.destroy(() => res.redirect("/login?reason=inactive"));
-  }
+  // Keine automatische Abmeldung wegen Inaktivität.
+  // Eine Session endet nur durch Logout, Account-Sperrung/Löschung oder
+  // eine durch den Administrator geänderte session_version.
   pool.query("SELECT id,name,email,status,admin,session_version FROM members WHERE id=$1", [req.session.member.id])
     .then(result => {
       const member = result.rows[0];
@@ -1233,9 +1236,50 @@ function maskIban(value = "") {
   return `${iban.slice(0, 4)} **** **** ${iban.slice(-4)}`;
 }
 
-function isPlausibleIban(value = "") {
+function isAdultBirthDate(value) {
+  const birth = dateFromYmd(value);
+  const today = dateFromYmd(berlinDate());
+  if (Number.isNaN(birth.getTime()) || Number.isNaN(today.getTime())) return false;
+  if (birth > today) return false;
+  let age = today.getUTCFullYear() - birth.getUTCFullYear();
+  const birthdayPassed =
+    today.getUTCMonth() > birth.getUTCMonth() ||
+    (today.getUTCMonth() === birth.getUTCMonth() && today.getUTCDate() >= birth.getUTCDate());
+  if (!birthdayPassed) age--;
+  return age >= 18;
+}
+
+function adultCutoffYmd() {
+  const today = dateFromYmd(berlinDate());
+  today.setUTCFullYear(today.getUTCFullYear() - 18);
+  return ymd(today);
+}
+
+function isValidIban(value = "") {
   const iban = normalizeIban(value);
-  return /^[A-Z]{2}[0-9A-Z]{13,32}$/.test(iban);
+  const lengths = {
+    AL:28, AD:24, AT:20, AZ:28, BH:22, BE:16, BA:20, BR:29, BG:22, CR:22,
+    HR:21, CY:28, CZ:24, DK:18, DO:28, EE:20, FO:18, FI:18, FR:27, GE:22,
+    DE:22, GI:23, GR:27, GL:18, GT:28, HU:28, IS:26, IE:22, IL:23, IT:27,
+    JO:30, KZ:20, KW:30, LV:21, LB:28, LI:21, LT:20, LU:20, MT:31, MR:27,
+    MU:30, MC:27, MD:24, ME:22, NL:18, MK:19, NO:15, PK:24, PL:28, PT:25,
+    QA:29, RO:24, SM:27, SA:24, RS:22, SK:24, SI:19, ES:24, SE:24, CH:21,
+    TN:24, TR:26, UA:29, AE:23, GB:22, VA:22
+  };
+  if (!/^[A-Z]{2}[0-9A-Z]+$/.test(iban)) return false;
+  if (lengths[iban.slice(0,2)] !== iban.length) return false;
+  const rearranged = iban.slice(4) + iban.slice(0,4);
+  let remainder = 0;
+  for (const ch of rearranged) {
+    const value = ch >= "A" && ch <= "Z" ? String(ch.charCodeAt(0) - 55) : ch;
+    for (const digit of String(value)) remainder = (remainder * 10 + Number(digit)) % 97;
+  }
+  return remainder === 1;
+}
+
+function isValidSignature(value = "") {
+  const signature = String(value || "");
+  return /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(signature) && signature.length <= 600000;
 }
 
 function addMonthsYmd(startYmd, months) {
@@ -1342,6 +1386,8 @@ async function initDb() {
       sepa_accepted_at TIMESTAMP,
       application_accepted BOOLEAN NOT NULL DEFAULT FALSE,
       application_accepted_at TIMESTAMP,
+      signature_data TEXT,
+      signature_created_at TIMESTAMP,
       notes TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -1649,7 +1695,13 @@ app.get("/membership", (req, res) => {
           <div><label>Hausnummer</label><input type="text" name="house_number" maxlength="20" required></div>
           <div><label>PLZ</label><input type="text" name="postal_code" maxlength="12" required></div>
           <div><label>Ort</label><input type="text" name="city" maxlength="100" required></div>
-          <div><label>Geburtsdatum</label><input type="date" name="birth_date" required></div>
+          <div>
+            <label>Geburtsdatum</label>
+            <input id="membershipBirthDate" type="date" name="birth_date" required max="${adultCutoffYmd()}">
+            <div id="minorWarning" class="alert" style="display:none;margin-top:8px">
+              ⚠️ Minderjährige können keinen Mitgliedsantrag abschließen. Der Antrag ist erst ab 18 Jahren möglich.
+            </div>
+          </div>
           <div><label>Telefon</label><input type="tel" name="phone" maxlength="50"></div>
           <div><label>E-Mail</label><input type="email" name="email" maxlength="200" required></div>
         </div>
@@ -1672,7 +1724,11 @@ app.get("/membership", (req, res) => {
         <p class="muted">Die Belastung erfolgt erst nach Annahme des Mitgliedsantrags und nach Maßgabe eurer SEPA-Informationen.</p>
         <div class="grid">
           <div><label>Kontoinhaber</label><input type="text" name="account_holder" maxlength="150" required></div>
-          <div><label>IBAN</label><input type="text" name="iban" autocomplete="off" maxlength="40" required></div>
+          <div>
+            <label>IBAN</label>
+            <input id="membershipIban" type="text" name="iban" autocomplete="off" maxlength="40" required>
+            <div id="ibanWarning" class="alert" style="display:none;margin-top:8px">⚠️ Bitte überprüfe deine IBAN.</div>
+          </div>
         </div>
 
         <label style="display:flex;gap:10px;align-items:flex-start;margin-top:16px">
@@ -1685,10 +1741,53 @@ app.get("/membership", (req, res) => {
           <span>Ich bestätige die Angaben und beantrage die gewählte Mitgliedschaft zu den oben beschriebenen Konditionen.</span>
         </label>
 
+        <h3>✍️ Unterschrift</h3>
+        <p class="muted">Bitte unterschreibe mit Finger, Stift oder Maus. Die Unterschrift ist Pflicht.</p>
+        <div style="border:1px solid #cfd8e3;border-radius:10px;background:#fff;max-width:650px">
+          <canvas id="signaturePad" width="650" height="220" style="width:100%;height:220px;display:block;touch-action:none"></canvas>
+        </div>
+        <input type="hidden" name="signature_data" id="signatureData">
+        <div class="actions" style="margin-top:8px">
+          <button class="btn secondary" type="button" id="clearSignature">Unterschrift löschen</button>
+          <span id="signatureHint" class="muted">Noch keine Unterschrift</span>
+        </div>
+
         <div class="actions">
-          <button class="btn" type="submit">Mitgliedsantrag absenden</button>
+          <button id="membershipSubmit" class="btn" type="submit">Mitgliedsantrag absenden</button>
         </div>
       </form>
+      <script>
+        (() => {
+          const form=document.querySelector('form[action="/membership/apply"]');
+          const birth=document.getElementById("membershipBirthDate");
+          const warning=document.getElementById("minorWarning");
+          const cutoff="${adultCutoffYmd()}";
+          const ibanInput=document.getElementById("membershipIban");
+          const ibanWarning=document.getElementById("ibanWarning");
+          const button=document.getElementById("membershipSubmit");
+          const signaturePad=document.getElementById("signaturePad");
+          const signatureData=document.getElementById("signatureData");
+          const signatureHint=document.getElementById("signatureHint");
+          const clearSignature=document.getElementById("clearSignature");
+          function checkAge(){ const minor=!!birth.value && birth.value>cutoff; warning.style.display=minor?"block":"none"; }
+          function checkIban(){
+            const v=String(ibanInput.value||"").replace(/\s+/g,"").toUpperCase();
+            let ok=/^[A-Z]{2}[0-9A-Z]+$/.test(v);
+            const lens={DE:22};
+            if(ok && lens[v.slice(0,2)]!==v.length) ok=false;
+            if(ok){ const r=v.slice(4)+v.slice(0,4); let rem=0; for(const ch of r){const n=ch>="A"&&ch<="Z"?String(ch.charCodeAt(0)-55):ch; for(const d of String(n)) rem=(rem*10+Number(d))%97;} ok=rem===1; }
+            ibanWarning.style.display=(v&&!ok)?"block":"none"; return ok;
+          }
+          const ctx=signaturePad.getContext("2d"); ctx.lineWidth=2.5; ctx.lineCap="round"; ctx.lineJoin="round"; let drawing=false;
+          function point(e){const r=signaturePad.getBoundingClientRect(); return {x:(e.clientX-r.left)*signaturePad.width/r.width,y:(e.clientY-r.top)*signaturePad.height/r.height};}
+          signaturePad.addEventListener("pointerdown",e=>{e.preventDefault();drawing=true;signaturePad.setPointerCapture?.(e.pointerId);const p=point(e);ctx.beginPath();ctx.moveTo(p.x,p.y);});
+          signaturePad.addEventListener("pointermove",e=>{if(!drawing)return;e.preventDefault();const p=point(e);ctx.lineTo(p.x,p.y);ctx.stroke();signatureData.value=signaturePad.toDataURL("image/png");signatureHint.textContent="Unterschrift vorhanden ✓";});
+          signaturePad.addEventListener("pointerup",()=>drawing=false); signaturePad.addEventListener("pointercancel",()=>drawing=false);
+          clearSignature.addEventListener("click",()=>{ctx.clearRect(0,0,signaturePad.width,signaturePad.height);signatureData.value="";signatureHint.textContent="Noch keine Unterschrift";});
+          birth.addEventListener("input",checkAge); birth.addEventListener("change",checkAge); ibanInput.addEventListener("input",checkIban); ibanInput.addEventListener("blur",checkIban);
+          form.addEventListener("submit",e=>{checkAge(); if(!checkIban()){e.preventDefault();ibanInput.focus();return;} if(!signatureData.value){e.preventDefault();alert("Bitte unterschreibe den Mitgliedsantrag.");signaturePad.scrollIntoView({behavior:"smooth",block:"center"});}});
+        })();
+      </script>
     </div>
   `, req));
 });
@@ -1709,10 +1808,36 @@ app.post("/membership/apply", async (req, res) => {
     const iban = normalizeIban(req.body.iban || "");
     const sepaAccepted = req.body.sepa_accepted === "1";
     const applicationAccepted = req.body.application_accepted === "1";
+    const signatureData = String(req.body.signature_data || "");
+
+    const validationErrors = [];
+    if (!firstName) validationErrors.push("Vorname fehlt.");
+    if (!lastName) validationErrors.push("Nachname fehlt.");
+    if (!street) validationErrors.push("Straße fehlt.");
+    if (!houseNumber) validationErrors.push("Hausnummer fehlt.");
+    if (!postalCode) validationErrors.push("PLZ fehlt.");
+    if (!city) validationErrors.push("Ort fehlt.");
+    if (!birthDate) validationErrors.push("Geburtsdatum fehlt oder ist ungültig.");
+    if (!email) validationErrors.push("E-Mail-Adresse fehlt.");
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) validationErrors.push("E-Mail-Adresse ist ungültig.");
+    if (!['monthly','annual'].includes(plan)) validationErrors.push("Bitte wähle eine Mitgliedschaft aus.");
+    if (!accountHolder) validationErrors.push("Kontoinhaber fehlt.");
+    if (!isValidIban(iban)) validationErrors.push("Die eingegebene IBAN ist ungültig.");
+    if (!sepaAccepted) validationErrors.push("Die SEPA-Ermächtigung muss bestätigt werden.");
+    if (!applicationAccepted) validationErrors.push("Der Mitgliedsantrag muss bestätigt werden.");
+    if (!isValidSignature(signatureData)) validationErrors.push("Die Unterschrift fehlt oder ist ungültig.");
+
+    if (validationErrors.length) {
+      return res.status(400).send(page("Mitgliedsantrag", `<div class="card error"><h2>⚠️ Bitte Angaben prüfen</h2><ul>${validationErrors.map(e=>`<li>${esc(e)}</li>`).join("")}</ul><a class="btn" href="/membership">Zurück zum Antrag</a></div>`, req));
+    }
+
+    if (!isAdultBirthDate(birthDate)) {
+      return res.status(400).send(page("Mitgliedsantrag", `<div class="card error"><h2>Mitgliedsantrag nicht möglich</h2><p>⚠️ Minderjährige können keinen Mitgliedsantrag abschließen. Eine Mitgliedschaft kann erst ab 18 Jahren beantragt werden.</p><a class="btn secondary" href="/membership">Zurück zum Antrag</a></div>`, req));
+    }
 
     if (!firstName || !lastName || !street || !houseNumber || !postalCode || !city ||
         !birthDate || !email || !["monthly", "annual"].includes(plan) ||
-        !accountHolder || !isPlausibleIban(iban) || !sepaAccepted || !applicationAccepted) {
+        !accountHolder || !isValidIban(iban) || !sepaAccepted || !applicationAccepted) {
       return res.status(400).send(page("Mitgliedsantrag", `
         <div class="card error">
           <h2>Antrag unvollständig</h2>
@@ -1723,16 +1848,18 @@ app.post("/membership/apply", async (req, res) => {
     }
 
     const duplicate = await pool.query(
-      `SELECT id FROM membership_applications
-       WHERE email=$1 AND status IN ('pending','approved')
-       LIMIT 1`,
-      [email]
+      `SELECT id, first_name, last_name, email FROM membership_applications
+       WHERE status IN ('pending','approved')
+         AND (LOWER(TRIM(email))=LOWER(TRIM($1))
+              OR (LOWER(TRIM(first_name))=LOWER(TRIM($2)) AND LOWER(TRIM(last_name))=LOWER(TRIM($3))))
+       ORDER BY created_at DESC LIMIT 1`,
+      [email, firstName, lastName]
     );
     if (duplicate.rowCount) {
       return res.status(409).send(page("Mitgliedsantrag", `
         <div class="card warn">
-          <h2>Antrag bereits vorhanden</h2>
-          <p>Für diese E-Mail-Adresse gibt es bereits einen offenen oder angenommenen Mitgliedsantrag.</p>
+          <h2>⚠️ Antrag bereits vorhanden</h2>
+          <p>Für diese E-Mail-Adresse oder diesen Vor- und Nachnamen gibt es bereits einen offenen oder angenommenen Mitgliedsantrag.</p>
           <a class="btn" href="/membership">Zurück</a>
         </div>
       `, req));
@@ -1746,14 +1873,14 @@ app.post("/membership/apply", async (req, res) => {
         first_name,last_name,street,house_number,postal_code,city,birth_date,
         email,phone,plan,amount_cents,billing_interval,
         iban_masked,iban_full,account_holder,
-        sepa_accepted,sepa_accepted_at,application_accepted,application_accepted_at
+        sepa_accepted,sepa_accepted_at,application_accepted,application_accepted_at,signature_data,signature_created_at
       ) VALUES(
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,TRUE,NOW(),TRUE,NOW()
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,TRUE,NOW(),TRUE,NOW(),$16,NOW()
       )`,
       [
         firstName,lastName,street,houseNumber,postalCode,city,birthDate,
         email,phone || null,plan,amountCents,interval,
-        maskIban(iban),iban,accountHolder
+        maskIban(iban),iban,accountHolder,signatureData
       ]
     );
 
@@ -2350,8 +2477,6 @@ app.post("/login", async (req, res) => {
 });
 
 
-app.get("/logout-inactive", (req, res) => { req.session.destroy(() => res.redirect("/login?reason=inactive")); });
-
 app.post("/logout", (req, res) => {
 
   req.session.destroy(() => {
@@ -2373,7 +2498,7 @@ app.get("/password", loginRequired, (req, res) => {
       </div>
 
       <div class="card">
-        <form method="post" action="/password" onsubmit="return confirm('Benutzer wirklich endgültig löschen? Der Benutzer muss sich danach neu registrieren.');">
+        <form method="post" action="/password" onsubmit="return true;">
           <label>Aktuelles Passwort</label>
           <input type="password" name="current_password" minlength="8" required>
 
@@ -3877,6 +4002,10 @@ app.get("/admin", adminRequired, async (req, res) => {
              <button class="btn secondary" type="submit">Zum Admin machen</button>
            </form>`;
 
+      const passwordAction = member.admin
+        ? ""
+        : `<a class="btn secondary" href="/admin/member/${member.id}/password">🔑 Passwort ändern</a>`;
+
       const deleteAction = member.admin
         ? ""
         : `<form method="post" action="/admin/delete-member/${member.id}" style="display:inline"
@@ -3893,6 +4022,7 @@ app.get("/admin", adminRequired, async (req, res) => {
             <div class="actions" style="margin-top:0">
               ${statusAction}
               ${adminAction}
+              ${passwordAction}
               ${deleteAction}
             </div>
           </td>
@@ -3933,9 +4063,10 @@ app.get("/admin", adminRequired, async (req, res) => {
         rejected: '<span class="badge error">Abgelehnt</span>',
         cancelled: '<span class="badge">Gekündigt</span>'
       };
-      let actions = "";
+      let actions = `<a class="btn secondary" href="/admin/membership/${application.id}/view">👁️ Öffnen</a>
+                     <a class="btn secondary" href="/admin/membership/${application.id}/view?print=1" target="_blank">🖨️ Drucken/PDF</a>`;
       if (application.status === "pending") {
-        actions = `
+        actions += `
           <form method="post" action="/admin/membership/${application.id}/approve" style="display:inline" onsubmit="return confirm('Mitgliedsantrag wirklich annehmen?');">
             <button class="btn" type="submit">Annehmen</button>
           </form>
@@ -3943,11 +4074,15 @@ app.get("/admin", adminRequired, async (req, res) => {
             <button class="btn danger" type="submit">Ablehnen</button>
           </form>`;
       } else if (application.status === "approved") {
-        actions = `
+        actions += `
           <form method="post" action="/membership/cancel/${application.id}" style="display:inline" onsubmit="return confirm('Mitgliedschaft wirklich kündigen? Das Wirksamkeitsdatum wird nach dem gewählten Tarif berechnet.');">
             <button class="btn danger" type="submit">Kündigen</button>
           </form>`;
       }
+      actions += `
+        <form method="post" action="/admin/membership/${application.id}/delete" style="display:inline" onsubmit="return confirm('Mitgliedsantrag wirklich endgültig löschen? Diese Aktion kann nicht rückgängig gemacht werden.');">
+          <button class="btn danger" type="submit">🗑️ Löschen</button>
+        </form>`;
       return `
         <tr>
           <td><b>${esc(application.first_name)} ${esc(application.last_name)}</b><br><span class="muted">${esc(application.email)} · ${esc(application.phone || "–")}</span></td>
@@ -4290,6 +4425,93 @@ app.post("/admin/membership/:id/reject", adminRequired, async (req, res) => {
     console.error("Fehler Mitgliedsantrag ablehnen:", error);
     res.status(500).send("Serverfehler");
   }
+});
+
+app.post("/admin/membership/:id/delete", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).send("Ungültiger Mitgliedsantrag.");
+    const result = await pool.query("DELETE FROM membership_applications WHERE id=$1 RETURNING id", [id]);
+    if (!result.rowCount) return res.status(404).send("Mitgliedsantrag nicht gefunden.");
+    res.redirect("/admin");
+  } catch (error) {
+    console.error("Fehler Mitgliedsantrag löschen:", error);
+    res.status(500).send("Mitgliedsantrag konnte nicht gelöscht werden.");
+  }
+});
+
+app.post("/admin/membership/:id/iban", adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = await pool.query("SELECT iban_full FROM membership_applications WHERE id=$1", [id]);
+    if (!result.rowCount) return res.status(404).json({ok:false,error:"Mitgliedsantrag nicht gefunden."});
+    const iban = normalizeIban(result.rows[0].iban_full || "");
+    if (!iban) return res.status(404).json({ok:false,error:"Keine IBAN hinterlegt."});
+    res.json({ok:true,iban});
+  } catch (error) {
+    console.error("Fehler IBAN anzeigen:", error);
+    res.status(500).json({ok:false,error:"IBAN konnte nicht geladen werden."});
+  }
+});
+
+app.get("/admin/membership/:id/view", adminRequired, async (req,res) => {
+  try {
+    const id=Number(req.params.id);
+    const result=await pool.query("SELECT * FROM membership_applications WHERE id=$1",[id]);
+    if(!result.rowCount) return res.status(404).send("Mitgliedsantrag nicht gefunden.");
+    const a=result.rows[0];
+    const planLabel=a.plan==='annual'?'Jährlich – 250 €':'Monatlich – 25 €';
+    const labels={pending:'Beantragt',approved:'Angenommen',rejected:'Abgelehnt',cancelled:'Gekündigt'};
+    const printMode=req.query.print==='1';
+    res.send(page("Mitgliedsantrag",`
+      <div class="card membership-detail ${printMode?'print-mode':''}">
+        <div class="actions no-print">
+          <a class="btn secondary" href="/admin">← Zurück</a>
+          <button class="btn" type="button" onclick="window.print()">🖨️ PDF / Drucken</button>
+          <a class="btn secondary" href="mailto:?subject=${encodeURIComponent(`Mitgliedsantrag – ${a.first_name} ${a.last_name}`)}&body=${encodeURIComponent(`Mitgliedsantrag von ${a.first_name} ${a.last_name}\nE-Mail: ${a.email}\nTelefon: ${a.phone||'–'}\nAdresse: ${a.street} ${a.house_number}, ${a.postal_code} ${a.city}\nGeburtsdatum: ${normalizeYmd(a.birth_date)}\nTarif: ${planLabel}\nKontoinhaber: ${a.account_holder}\nIBAN: ${a.iban_masked}`)}">✉️ Weiterleiten</a>
+        </div>
+        <h1>📝 Mitgliedsantrag</h1>
+        <p class="muted">Antragsnummer: ${a.id} · Eingegangen: ${esc(normalizeYmd(a.created_at))}</p>
+        <h2>Persönliche Daten</h2>
+        <table><tr><th>Vorname</th><td>${esc(a.first_name)}</td></tr><tr><th>Nachname</th><td>${esc(a.last_name)}</td></tr><tr><th>Geburtsdatum</th><td>${esc(normalizeYmd(a.birth_date))}</td></tr><tr><th>E-Mail</th><td>${esc(a.email)}</td></tr><tr><th>Telefon</th><td>${esc(a.phone||'–')}</td></tr></table>
+        <h2>Adresse</h2><table><tr><th>Adresse</th><td>${esc(a.street)} ${esc(a.house_number)}, ${esc(a.postal_code)} ${esc(a.city)}</td></tr></table>
+        <h2>Mitgliedschaft</h2><table><tr><th>Tarif</th><td>${esc(planLabel)}</td></tr><tr><th>Status</th><td>${esc(labels[a.status]||a.status)}</td></tr><tr><th>Beginn</th><td>${a.membership_start?esc(normalizeYmd(a.membership_start)):'–'}</td></tr><tr><th>Mindestende</th><td>${a.minimum_end_date?esc(normalizeYmd(a.minimum_end_date)):'–'}</td></tr></table>
+        <h2>SEPA</h2><table><tr><th>Kontoinhaber</th><td>${esc(a.account_holder)}</td></tr><tr><th>IBAN</th><td><span id="ibanMasked">${esc(a.iban_masked)}</span><span id="ibanFull" style="display:none;font-weight:700"> </span><div class="actions no-print" style="margin-top:8px"><button class="btn secondary" id="showIbanBtn" type="button">👁️ IBAN anzeigen</button><button class="btn secondary" id="copyIbanBtn" type="button" style="display:none">📋 IBAN kopieren</button></div><div id="ibanError" class="muted"></div></td></tr><tr><th>SEPA akzeptiert</th><td>${a.sepa_accepted?'Ja':'Nein'}</td></tr><tr><th>Antrag bestätigt</th><td>${a.application_accepted?'Ja':'Nein'}</td></tr><tr><th>Unterschrift</th><td>${a.signature_data?`<img src="${a.signature_data}" alt="Digitale Unterschrift" style="max-width:420px;max-height:140px;border:1px solid #ddd">`:'Nicht vorhanden'}</td></tr></table>
+        ${a.notes?`<h2>Notizen</h2><p style="white-space:pre-wrap">${esc(a.notes)}</p>`:''}
+      </div>
+      <script>
+        let revealedIban="";
+        const show=document.getElementById("showIbanBtn"),copy=document.getElementById("copyIbanBtn"),masked=document.getElementById("ibanMasked"),full=document.getElementById("ibanFull"),error=document.getElementById("ibanError");
+        show.addEventListener("click",async()=>{try{const r=await fetch("/admin/membership/${a.id}/iban",{method:"POST",headers:{Accept:"application/json"}});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"Fehler");revealedIban=d.iban;masked.style.display="none";full.textContent=d.iban;full.style.display="inline";copy.style.display="inline-block";show.textContent="🙈 IBAN ausblenden";show.onclick=()=>{masked.style.display="inline";full.style.display="none";copy.style.display="none";revealedIban="";show.textContent="👁️ IBAN anzeigen";};}catch(e){error.textContent="⚠️ "+e.message;}});
+        copy.addEventListener("click",async()=>{if(!revealedIban)return;try{await navigator.clipboard.writeText(revealedIban);copy.textContent="✅ Kopiert";setTimeout(()=>copy.textContent="📋 IBAN kopieren",1500);}catch(e){error.textContent="⚠️ Kopieren nicht möglich.";}});
+      </script>
+      <style>.membership-detail table{width:100%;border-collapse:collapse;margin-bottom:20px}.membership-detail th,.membership-detail td{padding:10px;border-bottom:1px solid #ddd;text-align:left}.membership-detail th{width:220px;background:#f5f7fa}@media print{.no-print{display:none!important}.membership-detail{box-shadow:none!important;border:0!important}}</style>
+    `,req));
+  } catch(error) { console.error("Fehler Mitgliedsantrag öffnen:",error); res.status(500).send("Serverfehler"); }
+});
+
+app.get("/admin/member/:id/password", adminRequired, async (req,res)=>{
+  try{
+    const id=Number(req.params.id);
+    const r=await pool.query("SELECT id,name,email,admin,status FROM members WHERE id=$1",[id]);
+    if(!r.rowCount) return res.redirect("/admin");
+    if(r.rows[0].admin) return res.status(400).send("Administratorkonten können hier nicht geändert werden.");
+    res.send(page("Passwort ändern",`<div class="card"><h1>🔑 Passwort ändern</h1><p>Neues Passwort für <b>${esc(r.rows[0].name)}</b> (${esc(r.rows[0].email)}).</p><form method="post" action="/admin/member/${id}/password"><label>Neues Passwort</label><input type="password" name="password" minlength="8" required><label>Passwort wiederholen</label><input type="password" name="confirm_password" minlength="8" required><div class="actions"><button class="btn" type="submit">Passwort speichern</button><a class="btn secondary" href="/admin">Abbrechen</a></div></form></div>`,req));
+  }catch(error){console.error(error);res.status(500).send("Serverfehler");}
+});
+
+app.post("/admin/member/:id/password", adminRequired, async (req,res)=>{
+  try{
+    const id=Number(req.params.id), password=String(req.body.password||""), confirm=String(req.body.confirm_password||"");
+    if(!Number.isInteger(id)||id<=0||password.length<8||password!==confirm) return res.status(400).send(page("Passwort ändern",`<div class="card error"><h2>Passwort nicht geändert</h2><p>Bitte zwei identische Passwörter mit mindestens 8 Zeichen eingeben.</p><a class="btn" href="/admin/member/${id}/password">Zurück</a></div>`,req));
+    const r=await pool.query("SELECT id,name,email,admin FROM members WHERE id=$1",[id]);
+    if(!r.rowCount) return res.status(404).send("Mitglied nicht gefunden.");
+    if(r.rows[0].admin) return res.status(400).send("Administratorkonten können hier nicht geändert werden.");
+    const hash=await bcrypt.hash(password,12);
+    await pool.query("UPDATE members SET password_hash=$1, session_version=session_version+1 WHERE id=$2",[hash,id]);
+    await destroyMemberSessions(id);
+    res.send(page("Passwort geändert",`<div class="card ok"><h2>✓ Passwort geändert</h2><p>Das Passwort von <b>${esc(r.rows[0].name)}</b> wurde geändert. Bestehende Sitzungen wurden beendet.</p><a class="btn" href="/admin">Zur Administration</a></div>`,req));
+  }catch(error){console.error("Fehler Admin-Passwort:",error);res.status(500).send("Serverfehler");}
 });
 
 app.post("/admin/create-member", adminRequired, async (req, res) => {
