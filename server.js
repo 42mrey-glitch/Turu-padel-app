@@ -1320,6 +1320,30 @@ async function initDb() {
       );
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS membership_form_settings(
+      id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT 'Mitgliedsantrag',
+      intro TEXT NOT NULL DEFAULT 'Werde Mitglied bei TuRU 1880 und reiche deinen Mitgliedsantrag online ein.',
+      personal_heading TEXT NOT NULL DEFAULT 'Persönliche Daten',
+      membership_heading TEXT NOT NULL DEFAULT 'Mitgliedschaft',
+      monthly_amount_cents INTEGER NOT NULL DEFAULT 2500,
+      annual_amount_cents INTEGER NOT NULL DEFAULT 25000,
+      monthly_text TEXT NOT NULL DEFAULT 'Kündigungsfrist: 1 Monat zum Monatsende.',
+      annual_text TEXT NOT NULL DEFAULT 'Mindestlaufzeit: 1 Jahr. Kündigung mit 1 Monat Frist zum Ablauf der Mindestlaufzeit.',
+      sepa_heading TEXT NOT NULL DEFAULT 'SEPA-Lastschrift',
+      sepa_text TEXT NOT NULL DEFAULT 'Die Belastung erfolgt erst nach Annahme des Mitgliedsantrags und nach Maßgabe eurer SEPA-Informationen.',
+      sepa_consent TEXT NOT NULL DEFAULT 'Ich ermächtige TuRU 1880, die fälligen Mitgliedsbeiträge per SEPA-Lastschrift von meinem angegebenen Konto einzuziehen.',
+      application_consent TEXT NOT NULL DEFAULT 'Ich bestätige die Angaben und beantrage die gewählte Mitgliedschaft zu den oben beschriebenen Konditionen.',
+      signature_heading TEXT NOT NULL DEFAULT 'Digitale Unterschrift',
+      signature_hint TEXT NOT NULL DEFAULT 'Mit der Eingabe bestätigst du den Antrag und das SEPA-Mandat.',
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    INSERT INTO membership_form_settings(id) VALUES(1) ON CONFLICT(id) DO NOTHING
+  `);
+  
+await pool.query(`
     CREATE TABLE IF NOT EXISTS membership_applications(
       id SERIAL PRIMARY KEY,
       first_name TEXT NOT NULL,
@@ -1631,15 +1655,79 @@ app.get("/terms", (req, res) => {
 });
 
 
-app.get("/membership", (req, res) => {
+
+app.get("/admin/membership-form", adminRequired, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM membership_form_settings WHERE id=1");
+    const f = result.rows[0] || {
+      title:"Mitgliedsantrag", intro:"Werde Mitglied bei TuRU 1880 und reiche deinen Mitgliedsantrag online ein.",
+      personal_heading:"Persönliche Daten", membership_heading:"Mitgliedschaft", sepa_heading:"SEPA-Lastschrift",
+      sepa_text:"Die Belastung erfolgt erst nach Annahme des Mitgliedsantrags und nach Maßgabe eurer SEPA-Informationen.",
+      sepa_consent:"Ich ermächtige TuRU 1880, die fälligen Mitgliedsbeiträge per SEPA-Lastschrift von meinem angegebenen Konto einzuziehen.",
+      application_consent:"Ich bestätige die Angaben und beantrage die gewählte Mitgliedschaft zu den oben beschriebenen Konditionen.",
+      signature_heading:"Digitale Unterschrift", signature_hint:"Mit der Eingabe bestätigst du den Antrag und das SEPA-Mandat.",
+      monthly_amount_cents:2500, annual_amount_cents:25000,
+      monthly_text:"Kündigungsfrist: 1 Monat zum Monatsende.", annual_text:"Mindestlaufzeit: 1 Jahr. Kündigung mit 1 Monat Frist zum Ablauf der Mindestlaufzeit."
+    };
+    const val=(x, d="")=>esc(x ?? d);
+    res.send(page("Mitgliedsantrag bearbeiten", `
+      <div class="hero"><h1>⚙️ Blanko-Mitgliedsantrag bearbeiten</h1><p>Diese Vorlage wird für neue Mitgliedsanträge verwendet. Bereits eingegangene Anträge bleiben unverändert.</p></div>
+      <form method="post" action="/admin/membership-form/save">
+        <div class="card"><h2>Allgemeine Texte</h2>
+          <label>Titel</label><input name="title" value="${val(f.title,"Mitgliedsantrag")}" required>
+          <label>Einleitung</label><textarea name="intro" rows="3" required>${val(f.intro)}</textarea>
+        </div>
+        <div class="card"><h2>Persönliche Daten</h2><label>Überschrift</label><input name="personal_heading" value="${val(f.personal_heading)}" required>
+          <p class="muted">Aktuell: Vorname, Nachname, Straße, Hausnummer, PLZ, Ort, Geburtsdatum, Telefon und E-Mail.</p>
+        </div>
+        <div class="card"><h2>Mitgliedschaft</h2><label>Überschrift</label><input name="membership_heading" value="${val(f.membership_heading)}" required>
+          <div class="grid"><div><label>Monatsbeitrag in €</label><input type="number" name="monthly_amount" min="0" step="0.01" value="${((Number(f.monthly_amount_cents||2500))/100).toFixed(2)}" required></div>
+          <div><label>Jahresbeitrag in €</label><input type="number" name="annual_amount" min="0" step="0.01" value="${((Number(f.annual_amount_cents||25000))/100).toFixed(2)}" required></div></div>
+          <label>Text monatliche Mitgliedschaft</label><textarea name="monthly_text" rows="2">${val(f.monthly_text)}</textarea>
+          <label>Text jährliche Mitgliedschaft</label><textarea name="annual_text" rows="2">${val(f.annual_text)}</textarea>
+        </div>
+        <div class="card"><h2>SEPA</h2><label>Überschrift</label><input name="sepa_heading" value="${val(f.sepa_heading)}" required>
+          <label>Hinweistext</label><textarea name="sepa_text" rows="3" required>${val(f.sepa_text)}</textarea>
+          <label>SEPA-Bestätigung</label><textarea name="sepa_consent" rows="4" required>${val(f.sepa_consent)}</textarea>
+        </div>
+        <div class="card"><h2>Antrag & digitale Unterschrift</h2>
+          <label>Bestätigung des Antrags</label><textarea name="application_consent" rows="4" required>${val(f.application_consent)}</textarea>
+          <label>Überschrift Unterschrift</label><input name="signature_heading" value="${val(f.signature_heading)}" required>
+          <label>Hinweis unter Unterschrift</label><textarea name="signature_hint" rows="3" required>${val(f.signature_hint)}</textarea>
+        </div>
+        <div class="card"><div class="actions"><button class="btn" type="submit">Änderungen speichern</button><a class="btn secondary" href="/membership" target="_blank">Blanko-Antrag ansehen</a><a class="btn secondary" href="/admin">Zur Administration</a></div></div>
+      </form>
+    `, req));
+  } catch(error){ console.error("Fehler Mitgliedsantrag-Vorlage:",error); res.status(500).send("Serverfehler"); }
+});
+
+app.post("/admin/membership-form/save", adminRequired, async (req,res)=>{
+  try{
+    const body=req.body;
+    const monthly=Math.round(Number(String(body.monthly_amount||"").replace(",","."))*100);
+    const annual=Math.round(Number(String(body.annual_amount||"").replace(",","."))*100);
+    if(!Number.isInteger(monthly)||monthly<0||!Number.isInteger(annual)||annual<0) return res.status(400).send("Ungültige Beitragshöhe.");
+    const fields=["title","intro","personal_heading","membership_heading","monthly_text","annual_text","sepa_heading","sepa_text","sepa_consent","application_consent","signature_heading","signature_hint"];
+    if(fields.some(k=>!String(body[k]||"").trim())) return res.status(400).send("Bitte alle Pflichttexte ausfüllen.");
+    await pool.query(`INSERT INTO membership_form_settings(id,title,intro,personal_heading,membership_heading,monthly_amount_cents,annual_amount_cents,monthly_text,annual_text,sepa_heading,sepa_text,sepa_consent,application_consent,signature_heading,signature_hint,updated_at)
+      VALUES(1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
+      ON CONFLICT(id) DO UPDATE SET title=EXCLUDED.title,intro=EXCLUDED.intro,personal_heading=EXCLUDED.personal_heading,membership_heading=EXCLUDED.membership_heading,monthly_amount_cents=EXCLUDED.monthly_amount_cents,annual_amount_cents=EXCLUDED.annual_amount_cents,monthly_text=EXCLUDED.monthly_text,annual_text=EXCLUDED.annual_text,sepa_heading=EXCLUDED.sepa_heading,sepa_text=EXCLUDED.sepa_text,sepa_consent=EXCLUDED.sepa_consent,application_consent=EXCLUDED.application_consent,signature_heading=EXCLUDED.signature_heading,signature_hint=EXCLUDED.signature_hint,updated_at=NOW()`,
+      [body.title.trim(),body.intro.trim(),body.personal_heading.trim(),body.membership_heading.trim(),monthly,annual,body.monthly_text.trim(),body.annual_text.trim(),body.sepa_heading.trim(),body.sepa_text.trim(),body.sepa_consent.trim(),body.application_consent.trim(),body.signature_heading.trim(),body.signature_hint.trim()]);
+    res.redirect("/admin/membership-form");
+  }catch(error){console.error("Fehler Speichern Mitgliedsantrag-Vorlage:",error);res.status(500).send("Serverfehler");}
+});
+
+app.get("/membership", async (req, res) => {
+  const formSettingsResult = await pool.query("SELECT * FROM membership_form_settings WHERE id=1");
+  const f = formSettingsResult.rows[0];
   res.send(page("Als Mitglied anmelden", `
     <div class="hero">
-      <h1>Mitgliedsantrag</h1>
-      <p>Werde Mitglied bei TuRU 1880 und reiche deinen Mitgliedsantrag online ein.</p>
+      <h1>${esc(f.title)}</h1>
+      <p>${esc(f.intro)}</p>
     </div>
 
     <div class="card">
-      <h2>Mitgliedsantrag</h2>
+      <h2>${esc(f.title)}</h2>
       <p class="muted">
         Wähle zwischen 25 € monatlich oder 250 € jährlich. Die monatliche Mitgliedschaft
         hat eine Kündigungsfrist von 1 Monat zum Monatsende. Die Jahresmitgliedschaft
@@ -1648,7 +1736,7 @@ app.get("/membership", (req, res) => {
       </p>
 
       <form method="post" action="/membership/apply">
-        <h3>Persönliche Daten</h3>
+        <h3>${esc(f.personal_heading)}</h3>
         <div class="grid">
           <div><label>Vorname</label><input type="text" name="first_name" maxlength="100" required></div>
           <div><label>Nachname</label><input type="text" name="last_name" maxlength="100" required></div>
@@ -1661,22 +1749,22 @@ app.get("/membership", (req, res) => {
           <div><label>E-Mail</label><input type="email" name="email" maxlength="200" required></div>
         </div>
 
-        <h3>Mitgliedschaft</h3>
+        <h3>${esc(f.membership_heading)}</h3>
         <div class="grid">
           <label class="card" style="margin:0">
             <input type="radio" name="plan" value="monthly" checked style="width:auto">
-            <b>Monatlich – 25 €</b><br>
-            <span class="muted">Kündigungsfrist: 1 Monat zum Monatsende.</span>
+            <b>Monatlich – ${((f.monthly_amount_cents||2500)/100).toFixed(2)} €</b><br>
+            <span class="muted">${esc(f.monthly_text)}</span>
           </label>
           <label class="card" style="margin:0">
             <input type="radio" name="plan" value="annual" style="width:auto">
-            <b>Jährlich – 250 €</b><br>
-            <span class="muted">Mindestlaufzeit: 1 Jahr. Kündigung mit 1 Monat Frist zum Ablauf der Mindestlaufzeit.</span>
+            <b>Jährlich – ${((f.annual_amount_cents||25000)/100).toFixed(2)} €</b><br>
+            <span class="muted">${esc(f.annual_text)}</span>
           </label>
         </div>
 
-        <h3>SEPA-Lastschrift</h3>
-        <p class="muted">Die Belastung erfolgt erst nach Annahme des Mitgliedsantrags und nach Maßgabe eurer SEPA-Informationen.</p>
+        <h3>${esc(f.sepa_heading)}</h3>
+        <p class="muted">${esc(f.sepa_text)}</p>
         <div class="grid">
           <div><label>Kontoinhaber</label><input type="text" name="account_holder" maxlength="150" required></div>
           <div><label>IBAN</label><input type="text" name="iban" autocomplete="off" maxlength="40" required></div>
@@ -1684,18 +1772,18 @@ app.get("/membership", (req, res) => {
 
         <label style="display:flex;gap:10px;align-items:flex-start;margin-top:16px">
           <input type="checkbox" name="sepa_accepted" value="1" required style="width:auto;margin-top:4px">
-          <span>Ich ermächtige TuRU 1880, die fälligen Mitgliedsbeiträge per SEPA-Lastschrift von meinem angegebenen Konto einzuziehen. Die genaue Gläubiger-ID und Mandatsreferenz werden mir separat bzw. mit der Bestätigung des Mitgliedsantrags mitgeteilt.</span>
+          <span>${esc(f.sepa_consent)}</span>
         </label>
 
         <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px">
           <input type="checkbox" name="application_accepted" value="1" required style="width:auto;margin-top:4px">
-          <span>Ich bestätige die Angaben und beantrage die gewählte Mitgliedschaft zu den oben beschriebenen Konditionen.</span>
+          <span>${esc(f.application_consent)}</span>
         </label>
 
-        <h3>Digitale Unterschrift</h3>
+        <h3>${esc(f.signature_heading)}</h3>
         <label>Unterschrift (Vor- und Nachname)</label>
         <input type="text" name="signature" maxlength="200" autocomplete="off" required placeholder="Vorname Nachname">
-        <p class="muted">Mit der Eingabe bestätigst du den Antrag und das SEPA-Mandat digital.</p>
+        <p class="muted">${esc(f.signature_hint)}</p>
 
         <div class="actions">
           <button class="btn" type="submit">Mitgliedsantrag absenden</button>
@@ -4300,88 +4388,42 @@ app.get("/admin/membership/:id", adminRequired, async (req, res) => {
       pending: "Beantragt", approved: "Angenommen", rejected: "Abgelehnt", cancelled: "Gekündigt"
     }[a.status] || a.status;
     const safeIban = normalizeIban(a.iban_full || "");
-    const birthDate = normalizeYmd(a.birth_date);
-    const safeNotes = a.notes || "";
-
     res.send(page("Mitgliedsantrag", `
-      <div class="hero"><h1>📝 Mitgliedsantrag bearbeiten</h1><p>${esc(a.first_name)} ${esc(a.last_name)} · ${esc(status)}</p></div>
-
-      <form method="post" action="/admin/membership/${a.id}/edit" onsubmit="return confirm('Änderungen am Mitgliedsantrag wirklich speichern?');">
-        <div class="card">
-          <h2>Persönliche Daten</h2>
-          <div class="grid">
-            <div><label>Vorname</label><input type="text" name="first_name" value="${esc(a.first_name)}" required></div>
-            <div><label>Nachname</label><input type="text" name="last_name" value="${esc(a.last_name)}" required></div>
-            <div><label>Geburtsdatum</label><input type="date" name="birth_date" value="${esc(birthDate)}" required></div>
-            <div><label>E-Mail</label><input type="email" name="email" value="${esc(a.email)}" required></div>
-            <div><label>Telefon</label><input type="text" name="phone" value="${esc(a.phone || "")}"></div>
-            <div><label>Straße</label><input type="text" name="street" value="${esc(a.street)}" required></div>
-            <div><label>Hausnummer</label><input type="text" name="house_number" value="${esc(a.house_number)}" required></div>
-            <div><label>PLZ</label><input type="text" name="postal_code" value="${esc(a.postal_code)}" required></div>
-            <div><label>Ort</label><input type="text" name="city" value="${esc(a.city)}" required></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Mitgliedschaft & SEPA</h2>
-          <div class="grid">
-            <div>
-              <label>Tarif</label>
-              <select name="plan" required>
-                <option value="monthly" ${a.plan === "monthly" ? "selected" : ""}>Monatlich – 25 €</option>
-                <option value="annual" ${a.plan === "annual" ? "selected" : ""}>Jährlich – 250 €</option>
-              </select>
-            </div>
-            <div><label>Kontoinhaber</label><input type="text" name="account_holder" value="${esc(a.account_holder)}" required></div>
-            <div style="grid-column:1/-1"><label>IBAN</label><input type="text" name="iban" value="${esc(safeIban)}" autocomplete="off" maxlength="34" required></div>
-          </div>
-          <p class="muted">Die IBAN wird beim Speichern erneut vollständig geprüft. Bei einer deutschen IBAN sind exakt 22 Zeichen erforderlich.</p>
-        </div>
-
-        <div class="card">
-          <h2>Interne Angaben</h2>
-          <div>
-            <label>Notizen</label>
-            <textarea name="notes" rows="5" style="width:100%;box-sizing:border-box">${esc(safeNotes)}</textarea>
-          </div>
-          <p><b>Status:</b> ${esc(status)}</p>
-          <p><b>Eingegangen:</b> ${esc(String(a.created_at))}</p>
-        </div>
-
-        <div class="card">
-          <h2>Bestätigungen</h2>
-          <p><b>SEPA akzeptiert:</b> ${a.sepa_accepted ? "Ja" : "Nein"}</p>
-          <p><b>Antrag akzeptiert:</b> ${a.application_accepted ? "Ja" : "Nein"}</p>
-          <p><b>Digitale Unterschrift:</b> ${esc(a.signature || "–")}</p>
-          <p class="muted">Die vom Antragsteller bestätigten Erklärungen werden hier nur angezeigt und nicht durch die Bearbeitung verändert.</p>
-        </div>
-
-        <div class="card">
-          <div class="actions">
-            <button class="btn" type="submit">Änderungen speichern</button>
-            ${a.status === "pending" ? `<button class="btn secondary" type="submit" formaction="/admin/membership/${a.id}/approve" formmethod="post" onclick="return confirm('Mitgliedsantrag wirklich annehmen?');">Annehmen</button>
-            <button class="btn danger" type="submit" formaction="/admin/membership/${a.id}/reject" formmethod="post" onclick="return confirm('Mitgliedsantrag wirklich ablehnen?');">Ablehnen</button>` : ""}
-            <a class="btn secondary" href="/admin">Zur Administration</a>
-          </div>
-        </div>
-      </form>
-
+      <div class="hero"><h1>📝 Mitgliedsantrag</h1><p>${esc(a.first_name)} ${esc(a.last_name)} · ${esc(status)}</p></div>
       <div class="card">
-        <h2>IBAN geschützt</h2>
-        <p><b>Aktuell:</b> <span id="ibanValue">${esc(maskIban(safeIban))}</span></p>
+        <h2>Persönliche Daten</h2>
+        <p><b>Name:</b> ${esc(a.first_name)} ${esc(a.last_name)}</p>
+        <p><b>Geburtsdatum:</b> ${esc(normalizeYmd(a.birth_date))}</p>
+        <p><b>Adresse:</b> ${esc(a.street)} ${esc(a.house_number)}, ${esc(a.postal_code)} ${esc(a.city)}</p>
+        <p><b>E-Mail:</b> ${esc(a.email)}<br><b>Telefon:</b> ${esc(a.phone || "–")}</p>
+      </div>
+      <div class="card">
+        <h2>Mitgliedschaft & SEPA</h2>
+        <p><b>Tarif:</b> ${a.plan === "annual" ? "Jährlich – 250 €" : "Monatlich – 25 €"}</p>
+        <p><b>Kontoinhaber:</b> ${esc(a.account_holder)}</p>
+        <p><b>IBAN:</b> <span id="ibanValue">${esc(maskIban(safeIban))}</span></p>
         <div class="actions">
           <button class="btn secondary" type="button" onclick="showIban()">IBAN anzeigen</button>
           <button class="btn secondary" type="button" onclick="copyIban()">IBAN kopieren</button>
         </div>
+        <p class="muted">Die vollständige IBAN wird ausschließlich in diesem geschützten Adminbereich angezeigt.</p>
       </div>
-
       <div class="card">
-        <h2>Antrag löschen</h2>
-        <form method="post" action="/admin/membership/${a.id}/delete" onsubmit="return confirm('Mitgliedsantrag wirklich endgültig löschen?');">
-          <button class="btn danger" type="submit">Antrag löschen</button>
-        </form>
+        <h2>Bestätigungen</h2>
+        <p><b>SEPA akzeptiert:</b> ${a.sepa_accepted ? "Ja" : "Nein"}</p>
+        <p><b>Antrag akzeptiert:</b> ${a.application_accepted ? "Ja" : "Nein"}</p>
+        <p><b>Digitale Unterschrift:</b> ${esc(a.signature || "–")}</p>
+        <p><b>Eingegangen:</b> ${esc(String(a.created_at))}</p>
       </div>
-
+      <div class="card">
+        <h2>Antrag verwalten</h2>
+        <div class="actions">
+          ${a.status === "pending" ? `<form method="post" action="/admin/membership/${a.id}/approve" onsubmit="return confirm('Mitgliedsantrag wirklich annehmen?');"><button class="btn" type="submit">Annehmen</button></form>
+          <form method="post" action="/admin/membership/${a.id}/reject" onsubmit="return confirm('Mitgliedsantrag wirklich ablehnen?');"><button class="btn danger" type="submit">Ablehnen</button></form>` : ""}
+          <form method="post" action="/admin/membership/${a.id}/delete" onsubmit="return confirm('Mitgliedsantrag wirklich endgültig löschen?');"><button class="btn danger" type="submit">Antrag löschen</button></form>
+          <a class="btn secondary" href="/admin">Zur Administration</a>
+        </div>
+      </div>
       <script>
         const fullIban = ${JSON.stringify(safeIban)};
         function showIban(){ document.getElementById('ibanValue').textContent = fullIban.replace(/(.{4})/g,'$1 ').trim(); }
@@ -4390,89 +4432,6 @@ app.get("/admin/membership/:id", adminRequired, async (req, res) => {
     `, req));
   } catch (error) {
     console.error("Fehler Mitgliedsantrag Details:", error);
-    res.status(500).send("Serverfehler");
-  }
-});
-
-app.post("/admin/membership/:id/edit", adminRequired, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).send("Ungültiger Antrag.");
-
-    const firstName = String(req.body.first_name || "").trim();
-    const lastName = String(req.body.last_name || "").trim();
-    const street = String(req.body.street || "").trim();
-    const houseNumber = String(req.body.house_number || "").trim();
-    const postalCode = String(req.body.postal_code || "").trim();
-    const city = String(req.body.city || "").trim();
-    const birthDate = String(req.body.birth_date || "").trim();
-    const email = String(req.body.email || "").trim().toLowerCase();
-    const phone = String(req.body.phone || "").trim();
-    const plan = String(req.body.plan || "").trim();
-    const accountHolder = String(req.body.account_holder || "").trim();
-    const iban = normalizeIban(req.body.iban || "");
-    const notes = String(req.body.notes || "").trim();
-
-    if (!firstName || !lastName || !street || !houseNumber || !postalCode || !city || !birthDate || !email || !accountHolder || !iban) {
-      return res.status(400).send(page("Mitgliedsantrag bearbeiten", nav(req) + `<div class="card error"><h2>Änderungen nicht gespeichert</h2><p>Bitte alle Pflichtfelder ausfüllen.</p><a class="btn" href="/admin/membership/${id}">Zurück</a></div>`, req));
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).send(page("Mitgliedsantrag bearbeiten", nav(req) + `<div class="card error"><h2>E-Mail ungültig</h2><p>Bitte eine gültige E-Mail-Adresse eingeben.</p><a class="btn" href="/admin/membership/${id}">Zurück</a></div>`, req));
-    }
-
-    if (!['monthly','annual'].includes(plan)) {
-      return res.status(400).send("Ungültiger Tarif.");
-    }
-
-    if (!isValidIban(iban)) {
-      return res.status(400).send(page("Mitgliedsantrag bearbeiten", nav(req) + `<div class="card error"><h2>IBAN ungültig</h2><p>Die IBAN-Prüfung ist fehlgeschlagen. Eine deutsche IBAN muss 22 Zeichen haben und die MOD-97-Prüfung bestehen.</p><a class="btn" href="/admin/membership/${id}">Zurück</a></div>`, req));
-    }
-
-    const current = await pool.query("SELECT * FROM membership_applications WHERE id=$1", [id]);
-    if (!current.rowCount) return res.status(404).send("Mitgliedsantrag nicht gefunden.");
-
-    const duplicate = await pool.query(
-      "SELECT id FROM membership_applications WHERE lower(email)=lower($1) AND id<>$2 AND status IN ('pending','approved') LIMIT 1",
-      [email, id]
-    );
-    if (duplicate.rowCount) {
-      return res.status(409).send(page("Mitgliedsantrag bearbeiten", nav(req) + `<div class="card warn"><h2>E-Mail bereits vorhanden</h2><p>Für diese E-Mail-Adresse existiert bereits ein anderer offener oder angenommener Mitgliedsantrag.</p><a class="btn" href="/admin/membership/${id}">Zurück</a></div>`, req));
-    }
-
-    const amountCents = plan === "annual" ? 25000 : 2500;
-    const billingInterval = plan === "annual" ? "annual" : "monthly";
-
-    await pool.query(
-      `UPDATE membership_applications
-       SET first_name=$1,
-           last_name=$2,
-           street=$3,
-           house_number=$4,
-           postal_code=$5,
-           city=$6,
-           birth_date=$7,
-           email=$8,
-           phone=$9,
-           plan=$10,
-           amount_cents=$11,
-           billing_interval=$12,
-           iban_masked=$13,
-           iban_full=$14,
-           account_holder=$15,
-           notes=$16,
-           updated_at=NOW()
-       WHERE id=$17`,
-      [
-        firstName, lastName, street, houseNumber, postalCode, city,
-        birthDate, email, phone || null, plan, amountCents, billingInterval,
-        maskIban(iban), iban, accountHolder, notes || null, id
-      ]
-    );
-
-    res.redirect(`/admin/membership/${id}`);
-  } catch (error) {
-    console.error("Fehler Mitgliedsantrag bearbeiten:", error);
     res.status(500).send("Serverfehler");
   }
 });
